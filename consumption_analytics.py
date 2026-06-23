@@ -44,9 +44,7 @@ ONEHOT_ENCODER_PATH  = os.path.join(ENCODER_DIR, "onehot_encoder.pkl")
 FEATURE_COLUMNS_PATH = os.path.join(ENCODER_DIR, "feature_columns.pkl")
 
 DATA_PATHS = [
-    os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_202602_화성시.csv"),
     os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_202602_hwaseungsi.csv"),
-    os.path.join(BASE_DIR,    "tbsh_gyeonggi_day_202602_화성시.csv"),
     os.path.join(BASE_DIR,    "tbsh_gyeonggi_day_202602_hwaseungsi.csv"),
 ]
 
