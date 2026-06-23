@@ -26,8 +26,26 @@ st.set_page_config(
     layout="wide"
 )
 
+import matplotlib.font_manager as fm
+
+def _set_korean_font():
+    korean_fonts = ["Malgun Gothic", "AppleGothic", "NanumGothic", "NanumBarunGothic",
+                    "Nanum Gothic", "나눔고딕"]
+    available = {f.name for f in fm.fontManager.ttflist}
+    for font in korean_fonts:
+        if font in available:
+            plt.rcParams["font.family"] = font
+            break
+    else:
+        # Streamlit Cloud: 나눔 폰트 경로 직접 탐색
+        nanum_paths = [p for p in fm.findSystemFonts() if "Nanum" in p or "nanum" in p]
+        if nanum_paths:
+            fm.fontManager.addfont(nanum_paths[0])
+            prop = fm.FontProperties(fname=nanum_paths[0])
+            plt.rcParams["font.family"] = prop.get_name()
+
+_set_korean_font()
 plt.rcParams["axes.unicode_minus"] = False
-plt.rcParams["font.family"] = ["Malgun Gothic", "AppleGothic", "NanumGothic", "DejaVu Sans"]
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
