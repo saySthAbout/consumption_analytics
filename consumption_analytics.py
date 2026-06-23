@@ -29,20 +29,28 @@ st.set_page_config(
 import matplotlib.font_manager as fm
 
 def _set_korean_font():
-    korean_fonts = ["Malgun Gothic", "AppleGothic", "NanumGothic", "NanumBarunGothic",
-                    "Nanum Gothic", "나눔고딕"]
+    # Streamlit Cloud(Linux)의 나눔 폰트 고정 경로 우선 시도
+    linux_nanum = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+    if os.path.exists(linux_nanum):
+        fm.fontManager.addfont(linux_nanum)
+        plt.rcParams["font.family"] = fm.FontProperties(fname=linux_nanum).get_name()
+        return
+
+    # 시스템 전체에서 나눔/한글 폰트 탐색
+    candidates = [p for p in fm.findSystemFonts(fontext="ttf")
+                  if any(k in p for k in ("Nanum", "nanum", "Malgun", "malgun", "AppleGothic"))]
+    if candidates:
+        fm.fontManager.addfont(candidates[0])
+        plt.rcParams["font.family"] = fm.FontProperties(fname=candidates[0]).get_name()
+        return
+
+    # 폰트 캐시 재구축 후 재탐색
+    fm.fontManager.__init__()
     available = {f.name for f in fm.fontManager.ttflist}
-    for font in korean_fonts:
-        if font in available:
-            plt.rcParams["font.family"] = font
-            break
-    else:
-        # Streamlit Cloud: 나눔 폰트 경로 직접 탐색
-        nanum_paths = [p for p in fm.findSystemFonts() if "Nanum" in p or "nanum" in p]
-        if nanum_paths:
-            fm.fontManager.addfont(nanum_paths[0])
-            prop = fm.FontProperties(fname=nanum_paths[0])
-            plt.rcParams["font.family"] = prop.get_name()
+    for name in ["NanumGothic", "Malgun Gothic", "AppleGothic", "NanumBarunGothic"]:
+        if name in available:
+            plt.rcParams["font.family"] = name
+            return
 
 _set_korean_font()
 plt.rcParams["axes.unicode_minus"] = False
