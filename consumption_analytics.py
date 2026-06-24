@@ -677,7 +677,18 @@ with tab_pred:
             st.info("모델과 인코더가 model/, encoders/ 폴더에 자동 저장되었습니다.")
 
         try:
-            pred = predict_sales(input_df)
+            model, model_info = load_saved_model()
+            encoded = transform_with_saved_encoders(input_df)
+
+            with st.expander("디버그: 인코딩된 입력값 확인"):
+                st.write("원본 입력값:", input_df.to_dict(orient="records")[0])
+                raw_pred = model.predict(encoded)[0]
+                st.write(f"모델 raw 출력 (log 공간): {raw_pred:.6f}")
+                st.write(f"use_log_target: {model_info.get('use_log_target')}")
+                st.dataframe(encoded, width='stretch')
+
+            pred = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
+            pred = max(pred, 0)
             st.success(f"예상 매출액: {pred:,.0f}원")
         except Exception as e:
             st.error(f"예측 오류: {e}")
