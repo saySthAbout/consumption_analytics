@@ -28,28 +28,25 @@ st.set_page_config(
 
 import matplotlib.font_manager as fm
 
-def _find_korean_font_path():
+def _setup_korean_font():
     candidates = [
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
     ]
-    for p in candidates:
-        if os.path.exists(p):
-            return p
     found = [p for p in fm.findSystemFonts(fontext="ttf")
              if any(k in p for k in ("Nanum", "nanum", "Malgun", "malgun", "AppleGothic"))]
-    return found[0] if found else None
-
-_KOREAN_FONT_PATH = _find_korean_font_path()
-
-def _apply_korean_font():
-    """그래프를 그리기 직전 호출해 항상 한글 폰트를 적용."""
-    if _KOREAN_FONT_PATH:
-        plt.rcParams["font.family"] = fm.FontProperties(fname=_KOREAN_FONT_PATH).get_name()
+    path = next((p for p in candidates if os.path.exists(p)), None) or (found[0] if found else None)
+    if path:
+        fm.fontManager.addfont(path)
+        font_name = fm.FontProperties(fname=path).get_name()
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [font_name] + plt.rcParams.get("font.sans-serif", [])
     plt.rcParams["axes.unicode_minus"] = False
 
-_apply_korean_font()
-plt.rcParams["axes.unicode_minus"] = False
+_setup_korean_font()
+
+def _apply_korean_font():
+    _setup_korean_font()
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
