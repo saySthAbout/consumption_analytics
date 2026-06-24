@@ -29,22 +29,17 @@ st.set_page_config(
 import matplotlib.font_manager as fm
 
 def _set_korean_font():
-    # 폰트 캐시 삭제 후 재구축 (Streamlit Cloud에서 캐시가 stale한 경우 대응)
-    cache_dir = fm.get_cachedir()
-    for f in os.listdir(cache_dir):
-        if f.startswith("fontlist") and f.endswith(".json"):
-            try:
-                os.remove(os.path.join(cache_dir, f))
-            except OSError:
-                pass
-    fm._load_fontmanager(try_read_cache=False)
-
     # Streamlit Cloud(Linux) 나눔 폰트 고정 경로 우선 시도
-    linux_nanum = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
-    if os.path.exists(linux_nanum):
-        fm.fontManager.addfont(linux_nanum)
-        plt.rcParams["font.family"] = fm.FontProperties(fname=linux_nanum).get_name()
-        return
+    nanum_paths = [
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+    ]
+    for path in nanum_paths:
+        if os.path.exists(path):
+            fm.fontManager.addfont(path)
+            prop = fm.FontProperties(fname=path)
+            plt.rcParams["font.family"] = prop.get_name()
+            return
 
     # 시스템 전체에서 나눔/한글 폰트 탐색
     candidates = [p for p in fm.findSystemFonts(fontext="ttf")
