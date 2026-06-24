@@ -69,10 +69,25 @@ LABEL_ENCODER_PATH   = os.path.join(ENCODER_DIR, "label_encoders.pkl")
 ONEHOT_ENCODER_PATH  = os.path.join(ENCODER_DIR, "onehot_encoder.pkl")
 FEATURE_COLUMNS_PATH = os.path.join(ENCODER_DIR, "feature_columns.pkl")
 
+GDRIVE_FILE_ID   = "1JnLZDcT0OY2bAQLcinH_eSXpzg9hS7RY"
+GDRIVE_FILE_NAME = "tbsh_gyeonggi_day_202602_hwaseungsi.csv"
+
 DATA_PATHS = [
-    os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_202602_hwaseungsi.csv"),
-    os.path.join(BASE_DIR,    "tbsh_gyeonggi_day_202602_hwaseungsi.csv"),
+    os.path.join(DATASET_DIR, GDRIVE_FILE_NAME),
+    os.path.join(BASE_DIR,    GDRIVE_FILE_NAME),
 ]
+
+
+def ensure_sales_data():
+    """CSV가 없으면 Google Drive에서 자동 다운로드."""
+    if any(os.path.exists(p) for p in DATA_PATHS):
+        return
+    import gdown
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    dest = DATA_PATHS[0]
+    url  = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
+    with st.spinner("매출 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회)"):
+        gdown.download(url, dest, quiet=False)
 
 ADMIN_CODE_PATHS = [
     os.path.join(DATASET_DIR, "hwaseong_admin_code.csv"),
@@ -412,6 +427,7 @@ use_log_target = st.sidebar.checkbox("매출금액 로그 변환 후 학습", va
 model_name     = st.sidebar.selectbox("모델 선택", ["RandomForest", "LinearRegression"])
 
 # ── 매출 데이터 로드 ────────────────────────────────────
+ensure_sales_data()
 try:
     raw_df, sales_enc, sales_path = load_sales_data()
     df = preprocess_data(raw_df)
