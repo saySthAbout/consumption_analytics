@@ -28,35 +28,27 @@ st.set_page_config(
 
 import matplotlib.font_manager as fm
 
-def _set_korean_font():
-    # Streamlit Cloud(Linux) 나눔 폰트 고정 경로 우선 시도
-    nanum_paths = [
+def _find_korean_font_path():
+    candidates = [
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
     ]
-    for path in nanum_paths:
-        if os.path.exists(path):
-            fm.fontManager.addfont(path)
-            prop = fm.FontProperties(fname=path)
-            plt.rcParams["font.family"] = prop.get_name()
-            return
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    found = [p for p in fm.findSystemFonts(fontext="ttf")
+             if any(k in p for k in ("Nanum", "nanum", "Malgun", "malgun", "AppleGothic"))]
+    return found[0] if found else None
 
-    # 시스템 전체에서 나눔/한글 폰트 탐색
-    candidates = [p for p in fm.findSystemFonts(fontext="ttf")
-                  if any(k in p for k in ("Nanum", "nanum", "Malgun", "malgun", "AppleGothic"))]
-    if candidates:
-        fm.fontManager.addfont(candidates[0])
-        plt.rcParams["font.family"] = fm.FontProperties(fname=candidates[0]).get_name()
-        return
+_KOREAN_FONT_PATH = _find_korean_font_path()
 
-    # 등록된 폰트 이름으로 탐색
-    available = {f.name for f in fm.fontManager.ttflist}
-    for name in ["NanumGothic", "Malgun Gothic", "AppleGothic", "NanumBarunGothic"]:
-        if name in available:
-            plt.rcParams["font.family"] = name
-            return
+def _apply_korean_font():
+    """그래프를 그리기 직전 호출해 항상 한글 폰트를 적용."""
+    if _KOREAN_FONT_PATH:
+        plt.rcParams["font.family"] = fm.FontProperties(fname=_KOREAN_FONT_PATH).get_name()
+    plt.rcParams["axes.unicode_minus"] = False
 
-_set_korean_font()
+_apply_korean_font()
 plt.rcParams["axes.unicode_minus"] = False
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -337,6 +329,7 @@ def fig_to_bytes(fig):
 
 
 def plot_corr_heatmap(df):
+    _apply_korean_font()
     cols = [c for c in ["cty_rgn_no","admi_cty_no","card_tpbuz_cd",
                         "hour","age","day","cnt","amt","log_amt"] if c in df.columns]
     corr = df[cols].corr(numeric_only=True)
@@ -348,6 +341,7 @@ def plot_corr_heatmap(df):
 
 
 def plot_age_hour_heatmap(df):
+    _apply_korean_font()
     pivot = pd.pivot_table(df, index="age_label", columns="hour_label",
                            values="amt", aggfunc="sum", fill_value=0)
     pivot = pivot.reindex(index=list(AGE_MAP.values()), columns=list(HOUR_MAP.values()))
@@ -361,6 +355,7 @@ def plot_age_hour_heatmap(df):
 
 
 def plot_day_hour_heatmap(df):
+    _apply_korean_font()
     pivot = pd.pivot_table(df, index="day_label", columns="hour_label",
                            values="amt", aggfunc="sum", fill_value=0)
     pivot = pivot.reindex(index=list(DAY_MAP.values()), columns=list(HOUR_MAP.values()))
@@ -374,6 +369,7 @@ def plot_day_hour_heatmap(df):
 
 
 def plot_biz_hour_heatmap(df, top_n=10):
+    _apply_korean_font()
     top_biz = (df.groupby("card_tpbuz_nm_2")["amt"]
                .sum().sort_values(ascending=False).head(top_n).index)
     pivot = pd.pivot_table(df[df["card_tpbuz_nm_2"].isin(top_biz)],
@@ -391,6 +387,7 @@ def plot_biz_hour_heatmap(df, top_n=10):
 
 
 def plot_histograms(df):
+    _apply_korean_font()
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     sns.histplot(df["amt"],     bins=50, ax=axes[0])
     axes[0].set_title("매출금액(amt) 분포"); axes[0].set_xlabel("매출금액")
@@ -401,6 +398,7 @@ def plot_histograms(df):
 
 
 def plot_actual_pred(y_true, y_pred):
+    _apply_korean_font()
     fig, ax = plt.subplots(figsize=(7, 7))
     ax.scatter(y_true, y_pred, alpha=0.3)
     mn = min(np.min(y_true), np.min(y_pred))
