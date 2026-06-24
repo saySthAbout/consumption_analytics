@@ -488,11 +488,11 @@ with tab_ov:
         "인코딩 방식": ["One-Hot Encoding", "Label Encoding", "Label Encoding",
                        "Label Encoding", "One-Hot Encoding",
                        "One-Hot Encoding", "One-Hot Encoding"],
-    }), use_container_width=True)
+    }), width='stretch')
 
     st.subheader("행정동 코드 데이터")
     st.write(f"행정동 코드 CSV 로드 개수: {len(admin_df)}개  /  행정동 옵션 개수: {len(admin_name_options)}개")
-    st.dataframe(admin_df, use_container_width=True)
+    st.dataframe(admin_df, width='stretch')
 
     st.subheader("모델 / 인코더 저장 경로 및 존재 여부")
     paths_check = [SALES_MODEL_PATH, MODEL_INFO_PATH,
@@ -500,10 +500,10 @@ with tab_ov:
     st.dataframe(pd.DataFrame({
         "파일": paths_check,
         "존재 여부": [os.path.exists(p) for p in paths_check],
-    }), use_container_width=True)
+    }), width='stretch')
 
     st.subheader("매출 데이터 미리보기")
-    st.dataframe(df.head(30), use_container_width=True)
+    st.dataframe(df.head(30), width='stretch')
 
 # =====================================================
 # 2. 탐색적 데이터 분석
@@ -518,11 +518,11 @@ with tab_eda:
     c1, c2 = st.columns(2)
     c1.metric("전체 결측치 개수", f"{int(df.isnull().sum().sum()):,}")
     c2.metric("중복 행 개수",     f"{int(df.duplicated().sum()):,}")
-    st.dataframe(missing_df, use_container_width=True)
+    st.dataframe(missing_df, width='stretch')
 
     st.subheader("2.2 주요 변수 기술통계")
     disp_cols = [c for c in ["amt","cnt","log_amt","log_cnt"] if c in df.columns]
-    st.dataframe(df[disp_cols].describe().T, use_container_width=True)
+    st.dataframe(df[disp_cols].describe().T, width='stretch')
 
     st.subheader("2.3 주요 변수별 데이터 분포 (Histogram)")
     with st.spinner("히스토그램 생성 중..."):
@@ -541,7 +541,7 @@ with tab_hm:
     st.pyplot(corr_fig)
     st.download_button("상관관계 Heatmap 다운로드", data=fig_to_bytes(corr_fig),
                        file_name="correlation_heatmap.png", mime="image/png")
-    st.dataframe(corr_df.round(3), use_container_width=True)
+    st.dataframe(corr_df.round(3), width='stretch')
 
     st.subheader("3.2 연령대 × 시간대 소비 Heatmap")
     with st.spinner("연령대 × 시간대 Heatmap 생성 중..."):
@@ -549,7 +549,7 @@ with tab_hm:
     st.pyplot(ah_fig)
     st.download_button("연령대_시간대 Heatmap 다운로드", data=fig_to_bytes(ah_fig),
                        file_name="age_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(ah_tbl.round(2), use_container_width=True)
+    st.dataframe(ah_tbl.round(2), width='stretch')
 
     st.subheader("3.3 요일 × 시간대 소비 Heatmap")
     with st.spinner("요일 × 시간대 Heatmap 생성 중..."):
@@ -557,7 +557,7 @@ with tab_hm:
     st.pyplot(dh_fig)
     st.download_button("요일_시간대 Heatmap 다운로드", data=fig_to_bytes(dh_fig),
                        file_name="day_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(dh_tbl.round(2), use_container_width=True)
+    st.dataframe(dh_tbl.round(2), width='stretch')
 
     st.subheader("3.4 업종 TOP 10 × 시간대 소비 Heatmap")
     with st.spinner("업종 × 시간대 Heatmap 생성 중..."):
@@ -565,7 +565,7 @@ with tab_hm:
     st.pyplot(bh_fig)
     st.download_button("업종_시간대 Heatmap 다운로드", data=fig_to_bytes(bh_fig),
                        file_name="biz_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(bh_tbl.round(2), use_container_width=True)
+    st.dataframe(bh_tbl.round(2), width='stretch')
 
 # =====================================================
 # 4. 모델 학습
@@ -649,7 +649,7 @@ with tab_pred:
 
         if admin_ok:
             with st.expander("행정동 전체 목록 확인"):
-                st.dataframe(admin_df, use_container_width=True)
+                st.dataframe(admin_df, width='stretch')
 
         sel_biz1 = st.selectbox("업종 대분류(card_tpbuz_nm_1)",
                                 sorted(df["card_tpbuz_nm_1"].dropna().unique()))
@@ -668,7 +668,7 @@ with tab_pred:
             "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
             "시간대": sel_hour_label, "행정동": sel_admi_name,
             "업종 대분류": sel_biz1, "업종 중분류": sel_biz2,
-        }]), use_container_width=True)
+        }]), width='stretch')
 
     if st.button("예상 매출액 예측하기"):
         if not model_files_exist():
@@ -688,7 +688,7 @@ with tab_pred:
         st.dataframe(pd.DataFrame({
             "파일": paths,
             "존재 여부": [os.path.exists(p) for p in paths],
-        }), use_container_width=True)
+        }), width='stretch')
 
 # =====================================================
 # 6. 보고서 문구
