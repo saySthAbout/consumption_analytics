@@ -12,6 +12,7 @@ import seaborn as sns
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+import lightgbm as lgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
@@ -262,9 +263,14 @@ def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name
     X_train, X_test, y_train, y_test = train_test_split(
         encoded_X, y, test_size=0.2, random_state=42)
 
-    model = (LinearRegression() if model_name == "LinearRegression"
-             else RandomForestRegressor(n_estimators=100, max_depth=18,
-                                        random_state=42, n_jobs=-1))
+    if model_name == "LinearRegression":
+        model = LinearRegression()
+    elif model_name == "LightGBM":
+        model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05,
+                                   num_leaves=127, random_state=42, n_jobs=-1)
+    else:
+        model = RandomForestRegressor(n_estimators=100, max_depth=18,
+                                      random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
     pred = model.predict(X_test)
 
@@ -423,7 +429,7 @@ if st.sidebar.button("Streamlit 캐시 초기화"):
 
 sample_size    = st.sidebar.slider("학습 샘플 수", 10000, 300000, 100000, step=10000)
 use_log_target = st.sidebar.checkbox("매출금액 로그 변환 후 학습", value=True)
-model_name     = st.sidebar.selectbox("모델 선택", ["RandomForest", "LinearRegression"])
+model_name     = st.sidebar.selectbox("모델 선택", ["RandomForest", "LightGBM", "LinearRegression"])
 
 # ── 매출 데이터 로드 ────────────────────────────────────
 ensure_sales_data()
