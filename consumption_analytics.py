@@ -655,22 +655,29 @@ with tab_pred:
                                 sorted(df["card_tpbuz_nm_1"].dropna().unique()))
         biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"]
                            .dropna().unique())
-        sel_biz2 = st.selectbox("업종 중분류(card_tpbuz_nm_2)", biz2_opts)
+        if not biz2_opts:
+            st.warning("선택한 대분류에 해당하는 중분류가 없습니다.")
+            sel_biz2 = None
+        else:
+            sel_biz2 = st.selectbox("업종 중분류(card_tpbuz_nm_2)", biz2_opts)
 
-        input_df = pd.DataFrame([{
-            "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
-            "admi_cty_no": sel_admi,
-            "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-        }])
+        if sel_biz2 is not None:
+            input_df = pd.DataFrame([{
+                "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
+                "admi_cty_no": sel_admi,
+                "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+            }])
 
-        st.subheader("입력값 확인")
-        st.dataframe(pd.DataFrame([{
-            "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
-            "시간대": sel_hour_label, "행정동": sel_admi_name,
-            "업종 대분류": sel_biz1, "업종 중분류": sel_biz2,
-        }]), width='stretch')
+            st.subheader("입력값 확인")
+            st.dataframe(pd.DataFrame([{
+                "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
+                "시간대": sel_hour_label, "행정동": sel_admi_name,
+                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2,
+            }]), width='stretch')
+        else:
+            input_df = None
 
-    if st.button("예상 매출액 예측하기"):
+    if st.button("예상 매출액 예측하기") and input_df is not None:
         if not model_files_exist():
             with st.spinner("저장된 모델이 없어 자동으로 학습 및 저장 중입니다..."):
                 train_and_save_model(df, sample_size, use_log_target, model_name)
