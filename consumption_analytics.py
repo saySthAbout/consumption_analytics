@@ -88,9 +88,10 @@ ADMIN_CODE_PATHS = [
 ]
 
 MODEL_FEATURES = ["sex", "age", "day", "hour", "month",
-                  "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
+                  "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2", "cnt"]
 LABEL_COLS  = ["age", "day", "hour", "month"]
 ONEHOT_COLS = ["sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
+NUMERIC_COLS = ["cnt"]
 
 AGE_MAP = {
     1: "0~9세",   2: "10~19세", 3: "20~29세", 4: "30~39세",
@@ -213,7 +214,9 @@ def fit_and_save_encoders(X):
     ohe_names = ohe.get_feature_names_out(ONEHOT_COLS).tolist()
     ohe_df    = pd.DataFrame(ohe_arr, columns=ohe_names, index=X.index)
 
+    num_df          = X[NUMERIC_COLS].reset_index(drop=True) if all(c in X.columns for c in NUMERIC_COLS) else pd.DataFrame()
     encoded_X       = pd.concat([X[LABEL_COLS].reset_index(drop=True),
+                                 num_df,
                                  ohe_df.reset_index(drop=True)], axis=1)
     feature_columns = encoded_X.columns.tolist()
 
@@ -242,7 +245,9 @@ def transform_with_saved_encoders(X):
     ohe_arr   = ohe.transform(X[ONEHOT_COLS].astype(str))
     ohe_names = ohe.get_feature_names_out(ONEHOT_COLS).tolist()
     ohe_df    = pd.DataFrame(ohe_arr, columns=ohe_names, index=X.index)
+    num_df    = X[NUMERIC_COLS].reset_index(drop=True) if all(c in X.columns for c in NUMERIC_COLS) else pd.DataFrame(index=ohe_df.index)
     encoded_X = pd.concat([X[LABEL_COLS].reset_index(drop=True),
+                           num_df,
                            ohe_df.reset_index(drop=True)], axis=1)
     return encoded_X.reindex(columns=feature_columns, fill_value=0)
 
@@ -644,11 +649,14 @@ with tab_pred:
         else:
             sel_biz2 = st.selectbox("업종 중분류(card_tpbuz_nm_2)", biz2_opts)
 
+        sel_cnt = st.number_input("거래 건수(cnt)", min_value=1, value=10, step=1)
+
         if sel_biz2 is not None:
             input_df = pd.DataFrame([{
                 "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
                 "month": sel_month, "admi_cty_no": sel_admi,
                 "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+                "cnt": sel_cnt,
             }])
 
             st.subheader("입력값 확인")
@@ -656,7 +664,7 @@ with tab_pred:
                 "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
                 "시간대": sel_hour_label, "월": f"{sel_month}월",
                 "행정동": sel_admi_name,
-                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2,
+                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2, "거래건수": sel_cnt,
             }]), width='stretch')
         else:
             input_df = None
