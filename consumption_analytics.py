@@ -427,7 +427,7 @@ if st.sidebar.button("Streamlit 캐시 초기화"):
     st.cache_resource.clear()
     st.sidebar.success("캐시 초기화 완료. 새로고침해주세요.")
 
-sample_size    = st.sidebar.slider("학습 샘플 수", 10000, 300000, 100000, step=10000)
+sample_size    = st.sidebar.slider("학습 샘플 수", 10000, 300000, 300000, step=10000)
 use_log_target = st.sidebar.checkbox("매출금액 로그 변환 후 학습", value=True)
 model_name     = st.sidebar.selectbox("모델 선택", ["RandomForest", "LightGBM", "LinearRegression"])
 
