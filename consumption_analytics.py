@@ -273,7 +273,7 @@ def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name
         model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05,
                                    num_leaves=127, random_state=42, n_jobs=-1)
     else:
-        model = RandomForestRegressor(n_estimators=200, max_depth=None,
+        model = RandomForestRegressor(n_estimators=100, max_depth=15,
                                       min_samples_leaf=5, max_features="sqrt",
                                       random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
@@ -319,7 +319,7 @@ def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use
         model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05,
                                    num_leaves=127, random_state=42, n_jobs=-1)
     else:
-        model = RandomForestRegressor(n_estimators=200, max_depth=None,
+        model = RandomForestRegressor(n_estimators=100, max_depth=15,
                                       min_samples_leaf=5, max_features="sqrt",
                                       random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
@@ -725,7 +725,7 @@ with tab_pred:
     if st.button("예상 매출액 예측하기") and input_df is not None:
         if not model_files_exist():
             with st.spinner("저장된 모델이 없어 자동으로 학습 및 저장 중입니다..."):
-                train_and_save_model(df, sample_size, use_log_target, model_name, remove_outliers)
+                train_and_save_model(df, min(sample_size, 100000), use_log_target, model_name, remove_outliers)
             st.info("모델과 인코더가 model/, encoders/ 폴더에 자동 저장되었습니다.")
 
         try:
