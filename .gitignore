@@ -1,5 +1,6 @@
-# 대용량 매출 데이터 (Google Drive에서 자동 다운로드)
-dataset/tbsh_gyeonggi_day_202602_hwaseungsi.csv
+# 대용량 매출 데이터 (로컬 학습용, GitHub 미포함)
+dataset/tbsh_gyeonggi_day_*.csv
+dataset/국가데이터처_*.csv
 
 # 학습된 모델 및 인코더는 GitHub에 포함 (Streamlit Cloud에서 로드용)
 

@@ -84,8 +84,7 @@ def ensure_sales_data():
         gdown.download(url, dest, quiet=False)
 
 ADMIN_CODE_PATHS = [
-    os.path.join(DATASET_DIR, "hwaseong_admin_code.csv"),
-    os.path.join(BASE_DIR,    "hwaseong_admin_code.csv"),
+    os.path.join(DATASET_DIR, "city_admin_code.csv"),
 ]
 
 MODEL_FEATURES = ["sex", "age", "day", "hour", "month",
@@ -138,8 +137,8 @@ def find_admin_path():
         if os.path.exists(p):
             return p
     raise FileNotFoundError(
-        "hwaseong_admin_code.csv 파일을 찾을 수 없습니다.\n"
-        "dataset/hwaseong_admin_code.csv 위치를 확인해주세요."
+        "city_admin_code.csv 파일을 찾을 수 없습니다.\n"
+        "dataset/city_admin_code.csv 위치를 확인해주세요."
     )
 
 
@@ -163,7 +162,7 @@ def load_admin_code_data(mtime):
             return admin_df, enc, path
         except Exception as e:
             last_err = e
-    raise ValueError(f"hwaseong_admin_code.csv 읽기 실패: {last_err}")
+    raise ValueError(f"city_admin_code.csv 읽기 실패: {last_err}")
 
 
 def build_admin_maps(admin_df):
@@ -514,7 +513,7 @@ with tab_ov:
     c4.metric("행정동 선택 수", f"{len(admin_name_options)}개")
 
     if not admin_ok:
-        st.warning("⚠️ hwaseong_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
+        st.warning("⚠️ city_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
 
     st.subheader(f"모델 입력 변수 ({len(MODEL_FEATURES)}개)")
     st.dataframe(pd.DataFrame({
@@ -627,7 +626,7 @@ with tab_pred:
 
     with p2:
         st.caption(f"행정동 선택 가능 개수: {len(admin_name_options)}개"
-                   + ("" if admin_ok else "  ⚠️ hwaseong_admin_code.csv 없음 — 코드값으로 표시"))
+                   + ("" if admin_ok else "  ⚠️ city_admin_code.csv 없음 — 코드값으로 표시"))
         sel_admi_name = st.selectbox("행정동(admi_cty_no)", options=admin_name_options)
         sel_admi      = admin_name_to_code[sel_admi_name]
 
