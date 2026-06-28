@@ -453,17 +453,17 @@ st.title("화성시 소비 트렌드 분석 및 매출 예측 AI")
 st.caption("성별, 연령, 요일, 시간대, 행정동, 업종을 입력하면 예상 매출금액을 예측합니다.")
 st.caption(f"실행 경로: {BASE_DIR}")
 
-# ── 사이드바 (탭과 무관하게 항상 표시) ─────────────────
-st.sidebar.header("모델 설정")
+# ── 사이드바 ─────────────────────────────────────────────
+st.sidebar.header("설정")
 if st.sidebar.button("Streamlit 캐시 초기화"):
     st.cache_data.clear()
     st.cache_resource.clear()
     st.sidebar.success("캐시 초기화 완료. 새로고침해주세요.")
 
-sample_size     = st.sidebar.slider("학습 샘플 수", 10000, 300000, 300000, step=10000)
-use_log_target  = st.sidebar.checkbox("매출금액 로그 변환 후 학습", value=True)
-remove_outliers = st.sidebar.checkbox("이상치 제거 (amt 상위 1%)", value=True)
-model_name      = st.sidebar.selectbox("모델 선택", ["RandomForest", "LightGBM", "LinearRegression"])
+sample_size     = 100000
+use_log_target  = True
+remove_outliers = True
+model_name      = "LightGBM"
 
 # ── 매출 데이터 로드 ────────────────────────────────────
 ensure_sales_data()
@@ -490,20 +490,13 @@ except Exception:
     admin_enc          = "-"
     admin_path         = "-"
 
-if st.sidebar.button("모델 재학습 및 저장"):
-    with st.spinner("모델과 인코더를 새로 학습 중..."):
-        train_and_save_model(df, sample_size, use_log_target, model_name, remove_outliers)
-    st.sidebar.success("model/, encoders/ 폴더에 저장 완료")
-
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_ov, tab_eda, tab_hm, tab_model, tab_compare, tab_pred, tab_report = st.tabs([
+tab_ov, tab_eda, tab_hm, tab_pred, tab_report = st.tabs([
     "1. 데이터 개요",
     "2. 탐색적 데이터 분석",
     "3. Heatmap",
-    "4. 모델 학습",
-    "5. 모델 비교",
-    "6. 매출 예측",
-    "7. 보고서 문구",
+    "4. 매출 예측",
+    "5. 보고서 문구",
 ])
 
 # =====================================================
@@ -609,63 +602,10 @@ with tab_hm:
     st.dataframe(bh_tbl.round(2), width='stretch')
 
 # =====================================================
-# 4. 모델 학습
-# =====================================================
-with tab_model:
-    st.subheader("4.1 인코딩 및 모델 학습")
-    st.write("""
-    본 프로젝트는 7개 입력 변수를 기준으로 매출금액을 예측한다.
-    순서 의미가 있는 `age`, `day`, `hour`는 Label Encoding을 적용하고,
-    순서 의미가 없는 `sex`, `admi_cty_no`, `card_tpbuz_nm_1`, `card_tpbuz_nm_2`는 One-Hot Encoding을 적용한다.
-    """)
-
-    if not model_files_exist():
-        st.warning("저장된 모델 또는 인코더가 없습니다. 아래 버튼을 눌러 먼저 학습해주세요.")
-
-    if st.button("모델 학습 및 저장"):
-        with st.spinner("모델과 인코더를 학습 중입니다..."):
-            model, model_info, X_test, y_test_real, pred_real = train_and_save_model(
-                df, sample_size, use_log_target, model_name, remove_outliers)
-        st.success("학습 완료. model/ 폴더와 encoders/ 폴더에 저장되었습니다.")
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("RMSE", f"{model_info['metrics']['RMSE']:,.0f}")
-        c2.metric("MAE",  f"{model_info['metrics']['MAE']:,.0f}")
-        c3.metric("R2",   f"{model_info['metrics']['R2']:.4f}")
-
-        st.subheader("예측값 vs 실제값")
-        ap_fig = plot_actual_pred(y_test_real, pred_real)
-        st.pyplot(ap_fig)
-        st.download_button("예측값_실제값 그래프 다운로드", data=fig_to_bytes(ap_fig),
-                           file_name="actual_vs_pred.png", mime="image/png")
-
-    if model_files_exist():
-        _, model_info = load_saved_model()
-        st.subheader("저장된 모델 정보")
-        st.json(model_info)
-        metrics = model_info.get("metrics", {})
-        c1, c2, c3 = st.columns(3)
-        c1.metric("RMSE", f"{metrics.get('RMSE', 0):,.0f}")
-        c2.metric("MAE",  f"{metrics.get('MAE',  0):,.0f}")
-        c3.metric("R2",   f"{metrics.get('R2',   0):.4f}")
-
-        st.subheader("저장 파일")
-        st.code(f"""
-{SALES_MODEL_PATH}
-{MODEL_INFO_PATH}
-{LABEL_ENCODER_PATH}
-{ONEHOT_ENCODER_PATH}
-{FEATURE_COLUMNS_PATH}
-        """)
-
-# =====================================================
-# 5. 매출 예측
+# 4. 매출 예측
 # =====================================================
 with tab_pred:
-    st.subheader("5. 매출 예측 화면")
-
-    if not model_files_exist():
-        st.info("저장된 모델/인코더가 아직 없습니다. 예측 버튼을 누르면 자동으로 학습 후 저장합니다.")
+    st.subheader("4. 매출 예측 화면")
 
     p1, p2 = st.columns(2)
 
@@ -723,11 +663,6 @@ with tab_pred:
             input_df = None
 
     if st.button("예상 매출액 예측하기") and input_df is not None:
-        if not model_files_exist():
-            with st.spinner("저장된 모델이 없어 자동으로 학습 및 저장 중입니다..."):
-                train_and_save_model(df, min(sample_size, 100000), use_log_target, model_name, remove_outliers)
-            st.info("모델과 인코더가 model/, encoders/ 폴더에 자동 저장되었습니다.")
-
         try:
             model, model_info = load_saved_model()
             encoded = transform_with_saved_encoders(input_df)
@@ -745,106 +680,11 @@ with tab_pred:
         except Exception as e:
             st.error(f"예측 오류: {e}")
 
-        st.subheader("저장 파일 확인")
-        paths = [SALES_MODEL_PATH, MODEL_INFO_PATH,
-                 LABEL_ENCODER_PATH, ONEHOT_ENCODER_PATH, FEATURE_COLUMNS_PATH]
-        st.dataframe(pd.DataFrame({
-            "파일": paths,
-            "존재 여부": [os.path.exists(p) for p in paths],
-        }), width='stretch')
-
 # =====================================================
-# 5. 모델 비교
-# =====================================================
-with tab_compare:
-    st.subheader("5. 모델 성능 비교")
-    st.write("RandomForest, LightGBM, LinearRegression 세 모델을 동일한 데이터로 학습하고 성능을 비교합니다.")
-    st.write("비교 완료 후 R² 기준 최고 성능 모델이 자동으로 저장되어 예측에 사용됩니다.")
-
-    if st.button("모델 비교 학습 시작"):
-        all_names = ["RandomForest", "LightGBM", "LinearRegression"]
-        results   = {}
-
-        with st.spinner("데이터 전처리 및 인코딩 중..."):
-            model_df = df[MODEL_FEATURES + ["amt", "log_amt"]].dropna().copy()
-            if remove_outliers:
-                upper    = model_df["amt"].quantile(0.99)
-                model_df = model_df[model_df["amt"] <= upper]
-            if sample_size and len(model_df) > sample_size:
-                model_df = model_df.sample(sample_size, random_state=42)
-            X         = model_df[MODEL_FEATURES]
-            y         = model_df["log_amt"] if use_log_target else model_df["amt"]
-            encoded_X = fit_and_save_encoders(X)
-            X_train, X_test, y_train, y_test = train_test_split(
-                encoded_X, y, test_size=0.2, random_state=42)
-
-        trained_models = {}
-        for name in all_names:
-            with st.spinner(f"{name} 학습 중..."):
-                m, metrics = train_single_model_no_save(
-                    X_train, X_test, y_train, y_test, name, use_log_target)
-                results[name]        = metrics
-                trained_models[name] = m
-
-        # ── 결과 테이블
-        compare_df = pd.DataFrame(results).T.reset_index().rename(columns={"index": "모델"})
-        compare_df = compare_df.sort_values("R2", ascending=False).reset_index(drop=True)
-        compare_df["순위"] = compare_df.index + 1
-        compare_df = compare_df[["순위", "모델", "R2", "RMSE", "MAE"]]
-        compare_df["R2"]   = compare_df["R2"].round(4)
-        compare_df["RMSE"] = compare_df["RMSE"].apply(lambda x: f"{x:,.0f}")
-        compare_df["MAE"]  = compare_df["MAE"].apply(lambda x: f"{x:,.0f}")
-
-        st.subheader("비교 결과")
-        st.dataframe(compare_df, width='stretch')
-
-        # ── R² 막대 차트
-        _apply_korean_font()
-        r2_vals  = {n: results[n]["R2"]   for n in all_names}
-        rmse_vals= {n: results[n]["RMSE"] for n in all_names}
-        fig, axes = plt.subplots(1, 3, figsize=(14, 5))
-        colors = ["#4C9BE8", "#E8834C", "#6FCF97"]
-        for i, (metric, vals) in enumerate([
-            ("R²",   {n: results[n]["R2"]   for n in all_names}),
-            ("RMSE", {n: results[n]["RMSE"] for n in all_names}),
-            ("MAE",  {n: results[n]["MAE"]  for n in all_names}),
-        ]):
-            axes[i].bar(list(vals.keys()), list(vals.values()), color=colors)
-            axes[i].set_title(metric, fontsize=14, fontweight="bold")
-            axes[i].set_ylabel(metric)
-            for j, v in enumerate(vals.values()):
-                label = f"{v:.4f}" if metric == "R²" else f"{v:,.0f}"
-                axes[i].text(j, v * 1.01, label, ha="center", fontsize=9)
-        plt.tight_layout()
-        st.pyplot(fig)
-        st.download_button("비교 차트 다운로드", data=fig_to_bytes(fig),
-                           file_name="model_comparison.png", mime="image/png")
-
-        # ── 최고 성능 모델 저장
-        best_name  = max(results, key=lambda n: results[n]["R2"])
-        best_model = trained_models[best_name]
-        best_info  = {
-            "model_name":      best_name,
-            "use_log_target":  use_log_target,
-            "remove_outliers": remove_outliers,
-            "sample_size":     sample_size,
-            "features":        MODEL_FEATURES,
-            "label_cols":      LABEL_COLS,
-            "onehot_cols":     ONEHOT_COLS,
-            "metrics":         results[best_name],
-            "selected_by":     "모델 비교 자동 선택",
-        }
-        joblib.dump(best_model, SALES_MODEL_PATH)
-        joblib.dump(best_info,  MODEL_INFO_PATH)
-
-        st.success(f"최고 성능 모델: **{best_name}**  (R² = {results[best_name]['R2']:.4f})")
-        st.info(f"{best_name} 모델이 예측 탭에서 사용될 모델로 자동 저장되었습니다.")
-
-# =====================================================
-# 7. 보고서 문구
+# 5. 보고서 문구
 # =====================================================
 with tab_report:
-    st.subheader("보고서에 붙여넣을 수 있는 문구")
+    st.subheader("5. 보고서에 붙여넣을 수 있는 문구")
     st.markdown("""
 ### 인코딩 및 모델 학습
 
