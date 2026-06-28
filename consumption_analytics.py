@@ -251,8 +251,12 @@ def transform_with_saved_encoders(X):
 # =========================================================
 # 3. 모델 학습 / 저장 / 예측
 # =========================================================
-def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name="RandomForest"):
+def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name="RandomForest",
+                         remove_outliers=True):
     model_df = df[MODEL_FEATURES + ["amt", "log_amt"]].dropna().copy()
+    if remove_outliers:
+        upper = model_df["amt"].quantile(0.99)
+        model_df = model_df[model_df["amt"] <= upper]
     if sample_size and len(model_df) > sample_size:
         model_df = model_df.sample(sample_size, random_state=42)
 
@@ -288,13 +292,14 @@ def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name
         "R2":   r2_score(y_test_real, pred_real),
     }
     model_info = {
-        "model_name":     model_name,
-        "use_log_target": use_log_target,
-        "sample_size":    sample_size,
-        "features":       MODEL_FEATURES,
-        "label_cols":     LABEL_COLS,
-        "onehot_cols":    ONEHOT_COLS,
-        "metrics":        metrics,
+        "model_name":      model_name,
+        "use_log_target":  use_log_target,
+        "remove_outliers": remove_outliers,
+        "sample_size":     sample_size,
+        "features":        MODEL_FEATURES,
+        "label_cols":      LABEL_COLS,
+        "onehot_cols":     ONEHOT_COLS,
+        "metrics":         metrics,
     }
     joblib.dump(model,      SALES_MODEL_PATH)
     joblib.dump(model_info, MODEL_INFO_PATH)
@@ -427,9 +432,10 @@ if st.sidebar.button("Streamlit 캐시 초기화"):
     st.cache_resource.clear()
     st.sidebar.success("캐시 초기화 완료. 새로고침해주세요.")
 
-sample_size    = st.sidebar.slider("학습 샘플 수", 10000, 300000, 300000, step=10000)
-use_log_target = st.sidebar.checkbox("매출금액 로그 변환 후 학습", value=True)
-model_name     = st.sidebar.selectbox("모델 선택", ["RandomForest", "LightGBM", "LinearRegression"])
+sample_size     = st.sidebar.slider("학습 샘플 수", 10000, 300000, 300000, step=10000)
+use_log_target  = st.sidebar.checkbox("매출금액 로그 변환 후 학습", value=True)
+remove_outliers = st.sidebar.checkbox("이상치 제거 (amt 상위 1%)", value=True)
+model_name      = st.sidebar.selectbox("모델 선택", ["RandomForest", "LightGBM", "LinearRegression"])
 
 # ── 매출 데이터 로드 ────────────────────────────────────
 ensure_sales_data()
@@ -458,7 +464,7 @@ except Exception:
 
 if st.sidebar.button("모델 재학습 및 저장"):
     with st.spinner("모델과 인코더를 새로 학습 중..."):
-        train_and_save_model(df, sample_size, use_log_target, model_name)
+        train_and_save_model(df, sample_size, use_log_target, model_name, remove_outliers)
     st.sidebar.success("model/, encoders/ 폴더에 저장 완료")
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
@@ -590,7 +596,7 @@ with tab_model:
     if st.button("모델 학습 및 저장"):
         with st.spinner("모델과 인코더를 학습 중입니다..."):
             model, model_info, X_test, y_test_real, pred_real = train_and_save_model(
-                df, sample_size, use_log_target, model_name)
+                df, sample_size, use_log_target, model_name, remove_outliers)
         st.success("학습 완료. model/ 폴더와 encoders/ 폴더에 저장되었습니다.")
 
         c1, c2, c3 = st.columns(3)
@@ -690,7 +696,7 @@ with tab_pred:
     if st.button("예상 매출액 예측하기") and input_df is not None:
         if not model_files_exist():
             with st.spinner("저장된 모델이 없어 자동으로 학습 및 저장 중입니다..."):
-                train_and_save_model(df, sample_size, use_log_target, model_name)
+                train_and_save_model(df, sample_size, use_log_target, model_name, remove_outliers)
             st.info("모델과 인코더가 model/, encoders/ 폴더에 자동 저장되었습니다.")
 
         try:
