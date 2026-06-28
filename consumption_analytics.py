@@ -311,6 +311,33 @@ def load_saved_model():
     return joblib.load(SALES_MODEL_PATH), joblib.load(MODEL_INFO_PATH)
 
 
+def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use_log_target):
+    """인코딩된 데이터로 모델 하나만 학습 — 파일 저장 없이 metrics 반환."""
+    if model_name == "LinearRegression":
+        model = LinearRegression()
+    elif model_name == "LightGBM":
+        model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05,
+                                   num_leaves=127, random_state=42, n_jobs=-1)
+    else:
+        model = RandomForestRegressor(n_estimators=200, max_depth=None,
+                                      min_samples_leaf=5, max_features="sqrt",
+                                      random_state=42, n_jobs=-1)
+    model.fit(X_train, y_train)
+    pred = model.predict(X_test)
+    if use_log_target:
+        y_real  = np.expm1(y_test)
+        p_real  = np.maximum(np.expm1(pred), 0)
+    else:
+        y_real  = y_test
+        p_real  = np.maximum(pred, 0)
+    metrics = {
+        "RMSE": np.sqrt(mean_squared_error(y_real, p_real)),
+        "MAE":  mean_absolute_error(y_real, p_real),
+        "R2":   r2_score(y_real, p_real),
+    }
+    return model, metrics
+
+
 def model_files_exist():
     return all(os.path.exists(p) for p in [
         SALES_MODEL_PATH, MODEL_INFO_PATH,
@@ -469,13 +496,14 @@ if st.sidebar.button("모델 재학습 및 저장"):
     st.sidebar.success("model/, encoders/ 폴더에 저장 완료")
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_ov, tab_eda, tab_hm, tab_model, tab_pred, tab_report = st.tabs([
+tab_ov, tab_eda, tab_hm, tab_model, tab_compare, tab_pred, tab_report = st.tabs([
     "1. 데이터 개요",
     "2. 탐색적 데이터 분석",
     "3. Heatmap",
     "4. 모델 학습",
-    "5. 매출 예측",
-    "6. 보고서 문구",
+    "5. 모델 비교",
+    "6. 매출 예측",
+    "7. 보고서 문구",
 ])
 
 # =====================================================
@@ -726,7 +754,94 @@ with tab_pred:
         }), width='stretch')
 
 # =====================================================
-# 6. 보고서 문구
+# 5. 모델 비교
+# =====================================================
+with tab_compare:
+    st.subheader("5. 모델 성능 비교")
+    st.write("RandomForest, LightGBM, LinearRegression 세 모델을 동일한 데이터로 학습하고 성능을 비교합니다.")
+    st.write("비교 완료 후 R² 기준 최고 성능 모델이 자동으로 저장되어 예측에 사용됩니다.")
+
+    if st.button("모델 비교 학습 시작"):
+        all_names = ["RandomForest", "LightGBM", "LinearRegression"]
+        results   = {}
+
+        with st.spinner("데이터 전처리 및 인코딩 중..."):
+            model_df = df[MODEL_FEATURES + ["amt", "log_amt"]].dropna().copy()
+            if remove_outliers:
+                upper    = model_df["amt"].quantile(0.99)
+                model_df = model_df[model_df["amt"] <= upper]
+            if sample_size and len(model_df) > sample_size:
+                model_df = model_df.sample(sample_size, random_state=42)
+            X         = model_df[MODEL_FEATURES]
+            y         = model_df["log_amt"] if use_log_target else model_df["amt"]
+            encoded_X = fit_and_save_encoders(X)
+            X_train, X_test, y_train, y_test = train_test_split(
+                encoded_X, y, test_size=0.2, random_state=42)
+
+        trained_models = {}
+        for name in all_names:
+            with st.spinner(f"{name} 학습 중..."):
+                m, metrics = train_single_model_no_save(
+                    X_train, X_test, y_train, y_test, name, use_log_target)
+                results[name]        = metrics
+                trained_models[name] = m
+
+        # ── 결과 테이블
+        compare_df = pd.DataFrame(results).T.reset_index().rename(columns={"index": "모델"})
+        compare_df = compare_df.sort_values("R2", ascending=False).reset_index(drop=True)
+        compare_df["순위"] = compare_df.index + 1
+        compare_df = compare_df[["순위", "모델", "R2", "RMSE", "MAE"]]
+        compare_df["R2"]   = compare_df["R2"].round(4)
+        compare_df["RMSE"] = compare_df["RMSE"].apply(lambda x: f"{x:,.0f}")
+        compare_df["MAE"]  = compare_df["MAE"].apply(lambda x: f"{x:,.0f}")
+
+        st.subheader("비교 결과")
+        st.dataframe(compare_df, width='stretch')
+
+        # ── R² 막대 차트
+        _apply_korean_font()
+        r2_vals  = {n: results[n]["R2"]   for n in all_names}
+        rmse_vals= {n: results[n]["RMSE"] for n in all_names}
+        fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+        colors = ["#4C9BE8", "#E8834C", "#6FCF97"]
+        for i, (metric, vals) in enumerate([
+            ("R²",   {n: results[n]["R2"]   for n in all_names}),
+            ("RMSE", {n: results[n]["RMSE"] for n in all_names}),
+            ("MAE",  {n: results[n]["MAE"]  for n in all_names}),
+        ]):
+            axes[i].bar(list(vals.keys()), list(vals.values()), color=colors)
+            axes[i].set_title(metric, fontsize=14, fontweight="bold")
+            axes[i].set_ylabel(metric)
+            for j, v in enumerate(vals.values()):
+                label = f"{v:.4f}" if metric == "R²" else f"{v:,.0f}"
+                axes[i].text(j, v * 1.01, label, ha="center", fontsize=9)
+        plt.tight_layout()
+        st.pyplot(fig)
+        st.download_button("비교 차트 다운로드", data=fig_to_bytes(fig),
+                           file_name="model_comparison.png", mime="image/png")
+
+        # ── 최고 성능 모델 저장
+        best_name  = max(results, key=lambda n: results[n]["R2"])
+        best_model = trained_models[best_name]
+        best_info  = {
+            "model_name":      best_name,
+            "use_log_target":  use_log_target,
+            "remove_outliers": remove_outliers,
+            "sample_size":     sample_size,
+            "features":        MODEL_FEATURES,
+            "label_cols":      LABEL_COLS,
+            "onehot_cols":     ONEHOT_COLS,
+            "metrics":         results[best_name],
+            "selected_by":     "모델 비교 자동 선택",
+        }
+        joblib.dump(best_model, SALES_MODEL_PATH)
+        joblib.dump(best_info,  MODEL_INFO_PATH)
+
+        st.success(f"최고 성능 모델: **{best_name}**  (R² = {results[best_name]['R2']:.4f})")
+        st.info(f"{best_name} 모델이 예측 탭에서 사용될 모델로 자동 저장되었습니다.")
+
+# =====================================================
+# 7. 보고서 문구
 # =====================================================
 with tab_report:
     st.subheader("보고서에 붙여넣을 수 있는 문구")
