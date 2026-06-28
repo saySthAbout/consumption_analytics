@@ -273,7 +273,8 @@ def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name
         model = lgb.LGBMRegressor(n_estimators=500, learning_rate=0.05,
                                    num_leaves=127, random_state=42, n_jobs=-1)
     else:
-        model = RandomForestRegressor(n_estimators=100, max_depth=18,
+        model = RandomForestRegressor(n_estimators=200, max_depth=None,
+                                      min_samples_leaf=5, max_features="sqrt",
                                       random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
     pred = model.predict(X_test)
