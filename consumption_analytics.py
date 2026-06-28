@@ -88,9 +88,9 @@ ADMIN_CODE_PATHS = [
     os.path.join(BASE_DIR,    "hwaseong_admin_code.csv"),
 ]
 
-MODEL_FEATURES = ["sex", "age", "day", "hour",
+MODEL_FEATURES = ["sex", "age", "day", "hour", "month",
                   "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
-LABEL_COLS  = ["age", "day", "hour"]
+LABEL_COLS  = ["age", "day", "hour", "month"]
 ONEHOT_COLS = ["sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
 
 AGE_MAP = {
@@ -488,11 +488,11 @@ with tab_ov:
     if not admin_ok:
         st.warning("⚠️ hwaseong_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
 
-    st.subheader("모델 입력 변수 (7개)")
+    st.subheader(f"모델 입력 변수 ({len(MODEL_FEATURES)}개)")
     st.dataframe(pd.DataFrame({
         "변수명": MODEL_FEATURES,
         "인코딩 방식": ["One-Hot Encoding", "Label Encoding", "Label Encoding",
-                       "Label Encoding", "One-Hot Encoding",
+                       "Label Encoding", "Label Encoding", "One-Hot Encoding",
                        "One-Hot Encoding", "One-Hot Encoding"],
     }), width='stretch')
 
@@ -647,6 +647,9 @@ with tab_pred:
         sel_hour_label = st.selectbox("시간대(hour)", list(HOUR_MAP.values()), index=4)
         sel_hour       = {v: k for k, v in HOUR_MAP.items()}[sel_hour_label]
 
+        sel_month      = st.selectbox("월(month)", list(range(1, 13)), index=0,
+                                      format_func=lambda x: f"{x}월")
+
     with p2:
         st.caption(f"행정동 선택 가능 개수: {len(admin_name_options)}개"
                    + ("" if admin_ok else "  ⚠️ hwaseong_admin_code.csv 없음 — 코드값으로 표시"))
@@ -670,14 +673,15 @@ with tab_pred:
         if sel_biz2 is not None:
             input_df = pd.DataFrame([{
                 "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
-                "admi_cty_no": sel_admi,
+                "month": sel_month, "admi_cty_no": sel_admi,
                 "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
             }])
 
             st.subheader("입력값 확인")
             st.dataframe(pd.DataFrame([{
                 "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
-                "시간대": sel_hour_label, "행정동": sel_admi_name,
+                "시간대": sel_hour_label, "월": f"{sel_month}월",
+                "행정동": sel_admi_name,
                 "업종 대분류": sel_biz1, "업종 중분류": sel_biz2,
             }]), width='stretch')
         else:
