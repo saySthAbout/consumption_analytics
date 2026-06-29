@@ -705,6 +705,77 @@ with tab_pred:
 
             st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
 
+            # ── 고객 세그먼트별 상세 분석 표 ──
+            st.divider()
+            st.subheader("고객 유형별 매출 분석")
+
+            seg_rows = []
+            total_ref_cnt = len(ref)
+            for _, combo in combos.iterrows():
+                h, s, a = int(combo["hour"]), combo["sex"], int(combo["age"])
+                # 해당 조합의 실제 데이터 비중
+                seg_mask = (ref["hour"] == h) & (ref["sex"] == s) & (ref["age"] == a)
+                seg_cnt  = seg_mask.sum()
+                seg_ratio = seg_cnt / total_ref_cnt * 100 if total_ref_cnt > 0 else 0
+
+                # 예측
+                input_row = pd.DataFrame([{
+                    "sex": s, "age": a, "day": sel_day, "hour": h,
+                    "month": sel_month, "admi_cty_no": sel_admi,
+                    "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+                    "cnt": sel_cnt,
+                }])
+                try:
+                    enc = transform_with_saved_encoders(input_row)
+                    rp  = model.predict(enc)[0]
+                    p   = max(np.expm1(rp) if model_info.get("use_log_target", True) else rp, 0)
+                except Exception:
+                    p = 0.0
+
+                seg_rows.append({
+                    "시간대":     HOUR_MAP.get(h, str(h)),
+                    "성별":       "여성" if s == "F" else "남성",
+                    "연령대":     AGE_MAP.get(a, f"{a}"),
+                    "건당 예측 매출(원)": int(p),
+                    "거래 건수":  sel_cnt,
+                    "예상 매출(원)":      int(p * sel_cnt),
+                    "데이터 비중(%)":     round(seg_ratio, 1),
+                })
+
+            if seg_rows:
+                seg_df = (
+                    pd.DataFrame(seg_rows)
+                    .sort_values("데이터 비중(%)", ascending=False)
+                    .reset_index(drop=True)
+                )
+
+                # 요약 피벗: 연령대 × 성별 건당 매출 평균
+                st.markdown("**연령대 × 성별 건당 평균 예측 매출 (원)**")
+                pivot = (
+                    seg_df.groupby(["연령대", "성별"])["건당 예측 매출(원)"]
+                    .mean()
+                    .round(0)
+                    .astype(int)
+                    .unstack("성별")
+                    .reindex([v for v in AGE_MAP.values() if v in seg_df["연령대"].values])
+                )
+                st.dataframe(
+                    pivot.style.format("{:,}").background_gradient(cmap="Blues", axis=None),
+                    use_container_width=True
+                )
+
+                # 전체 세그먼트 상세 표
+                st.markdown("**시간대 × 성별 × 연령대 상세**")
+                st.dataframe(
+                    seg_df.style.format({
+                        "건당 예측 매출(원)": "{:,}",
+                        "예상 매출(원)": "{:,}",
+                        "데이터 비중(%)": "{:.1f}%",
+                    }).background_gradient(subset=["건당 예측 매출(원)"], cmap="Greens"),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
         except Exception as e:
             st.error(f"예측 오류: {e}")
 
