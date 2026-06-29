@@ -1000,16 +1000,41 @@ with tab_lstm:
             except Exception as e:
                 st.warning(f"LSTM 예측 오류: {e}")
 
+        # 단위 자동 선택
+        max_amt = daily["amt"].max()
+        if max_amt >= 1e8:
+            unit_div, unit_label = 1e8, "억원"
+        elif max_amt >= 1e4:
+            unit_div, unit_label = 1e4, "만원"
+        else:
+            unit_div, unit_label = 1, "원"
+
+        # 차트 y값 단위 변환
+        for trace in fig.data:
+            trace.y = [v / unit_div for v in trace.y]
+            trace.hovertemplate = f"%{{y:,.1f}}{unit_label}<extra>%{{fullData.name}}</extra>"
+
         fig.update_layout(
             title=f"일별 매출 추이 ({lt_district} {lt_admi_name} · {lt_biz2})",
-            xaxis_title="날짜", yaxis_title="매출액 (원)",
-            hovermode="x unified", height=440
+            xaxis_title="날짜",
+            yaxis_title=f"매출액 ({unit_label})",
+            yaxis=dict(tickformat=",.1f"),
+            hovermode="x unified",
+            height=440
         )
         st.plotly_chart(fig, use_container_width=True)
 
+        avg_amt = daily["amt"].mean()
+        tot_amt = daily["amt"].sum()
+
+        def fmt(v):
+            if v >= 1e8:   return f"{v/1e8:,.1f}억원"
+            if v >= 1e4:   return f"{v/1e4:,.0f}만원"
+            return f"{v:,.0f}원"
+
         d1, d2 = st.columns(2)
-        d1.metric("기간 평균 일매출", f"{daily['amt'].mean():,.0f}원")
-        d2.metric("기간 총 매출",     f"{daily['amt'].sum():,.0f}원")
+        d1.metric("기간 평균 일매출", fmt(avg_amt))
+        d2.metric("기간 총 매출",     fmt(tot_amt))
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
