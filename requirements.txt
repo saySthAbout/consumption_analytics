@@ -8,5 +8,5 @@ seaborn
 gdown
 lightgbm
 torch
-anthropic
+openai
 plotly

@@ -876,17 +876,17 @@ with tab_cluster:
             st.error(f"군집 모델 로드 오류: {e}")
 
 # =====================================================
-# 📝 AI 리포트 (Claude API)
+# 📝 AI 리포트 (OpenAI API)
 # =====================================================
 with tab_ai:
     st.subheader("AI가 분석한 우리 동네 소비 리포트")
-    st.caption("데이터를 요약해 Claude AI가 사장님을 위한 인사이트 리포트를 작성합니다.")
+    st.caption("데이터를 요약해 GPT-4o가 사장님을 위한 인사이트 리포트를 작성합니다.")
 
     # API 키: secrets 우선, 없으면 입력창
-    api_key = st.secrets.get("ANTHROPIC_API_KEY", "") if hasattr(st, "secrets") else ""
+    api_key = st.secrets.get("OPENAI_API_KEY", "") if hasattr(st, "secrets") else ""
     if not api_key:
-        api_key = st.text_input("Anthropic API Key", type="password",
-                                placeholder="sk-ant-...")
+        api_key = st.text_input("OpenAI API Key", type="password",
+                                placeholder="sk-proj-...")
 
     # 리포트 생성 옵션
     report_district = st.selectbox("분석할 지역", admin_district_list if admin_ok else ["전체"])
@@ -894,11 +894,11 @@ with tab_ai:
 
     if st.button("📝 AI 리포트 생성", type="primary"):
         if not api_key:
-            st.warning("Anthropic API Key를 입력해주세요.")
+            st.warning("OpenAI API Key를 입력해주세요.")
         else:
-            with st.spinner("Claude AI가 리포트를 작성 중입니다..."):
+            with st.spinner("GPT-4o가 리포트를 작성 중입니다..."):
                 try:
-                    import anthropic
+                    from openai import OpenAI
 
                     # 데이터 요약 생성
                     filtered = df.copy()
@@ -929,14 +929,13 @@ with tab_ai:
 - 매출 상위 업종 중분류 TOP 5: {', '.join([f'{k}({v:,.0f}원)' for k, v in top_biz2.items()])}
 """
 
-                    client = anthropic.Anthropic(api_key=api_key)
-                    message = client.messages.create(
-                        model="claude-sonnet-4-6",
+                    client = OpenAI(api_key=api_key)
+                    response = client.chat.completions.create(
+                        model="gpt-4o",
                         max_tokens=1024,
-                        messages=[{
-                            "role": "user",
-                            "content": f"""당신은 소상공인을 위한 경영 컨설턴트입니다.
-아래 경기도 카드 소비 데이터 분석 결과를 바탕으로 사장님이 바로 활용할 수 있는 인사이트 리포트를 작성해주세요.
+                        messages=[
+                            {"role": "system", "content": "당신은 소상공인을 위한 경영 컨설턴트입니다."},
+                            {"role": "user", "content": f"""아래 경기도 카드 소비 데이터 분석 결과를 바탕으로 사장님이 바로 활용할 수 있는 인사이트 리포트를 작성해주세요.
 
 {summary}
 
@@ -945,20 +944,20 @@ with tab_ai:
 2. 주목할 소비 패턴 (2~3가지)
 3. 사장님께 드리는 제안 (2~3가지 실용적인 조언)
 
-전문 용어보다는 사장님이 바로 이해할 수 있는 쉬운 언어로 작성해주세요."""
-                        }]
+전문 용어보다는 사장님이 바로 이해할 수 있는 쉬운 언어로 작성해주세요."""}
+                        ]
                     )
-                    report_text = message.content[0].text
+                    report_text = response.choices[0].message.content
                     st.markdown(report_text)
                     st.download_button("리포트 저장 (텍스트)", data=report_text,
                                        file_name="ai_report.txt", mime="text/plain")
 
-                    # 토큰 사용량 및 비용 표시 (claude-sonnet-4-6 기준)
-                    input_tokens  = message.usage.input_tokens
-                    output_tokens = message.usage.output_tokens
-                    # 공식 가격: input $3 / 1M tokens, output $15 / 1M tokens
-                    cost_usd = (input_tokens * 3 + output_tokens * 15) / 1_000_000
-                    cost_krw = cost_usd * 1380  # 환율 고정 (1달러 ≈ 1380원)
+                    # 토큰 사용량 및 비용 표시 (gpt-4o 기준)
+                    input_tokens  = response.usage.prompt_tokens
+                    output_tokens = response.usage.completion_tokens
+                    # 공식 가격: input $2.5 / 1M tokens, output $10 / 1M tokens
+                    cost_usd = (input_tokens * 2.5 + output_tokens * 10) / 1_000_000
+                    cost_krw = cost_usd * 1380
                     st.caption(
                         f"💸 이번 리포트 비용: **${cost_usd:.4f}** (약 {cost_krw:.1f}원) "
                         f"| 입력 {input_tokens:,}토큰 + 출력 {output_tokens:,}토큰"
