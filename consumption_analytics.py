@@ -421,17 +421,6 @@ def load_store_counts():
     df = pd.read_csv(path, encoding="utf-8-sig", dtype={"행정동코드": str})
     return df
 
-# 카드 대분류 → SEMAS 대분류 매핑
-CARD_TO_SEMAS_BIZ = {
-    "음식":        "음식",
-    "소매/유통":   "소매",
-    "의료/건강":   "보건의료",
-    "학문/교육":   "교육",
-    "생활서비스":  "수리·개인",
-    "여가/오락":   "예술·스포츠",
-    "공연/전시":   "예술·스포츠",
-}
-
 
 def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use_log_target):
     """인코딩된 데이터로 모델 하나만 학습 — 파일 저장 없이 metrics 반환."""
@@ -954,7 +943,7 @@ with tab_lstm:
         if lt_admi_code:
             lt_df = lt_df[lt_df["admi_cty_no"] == lt_admi_code]
     elif lt_district != "전체" and admin_ok:
-        lt_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(lt_district, []))
+        lt_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(lt_district, []) if d in admin_name_to_code}
         lt_df = lt_df[lt_df["admi_cty_no"].isin(lt_codes)]
     if lt_biz1 != "전체":
         lt_df = lt_df[lt_df["card_tpbuz_nm_1"] == lt_biz1]
@@ -982,10 +971,9 @@ with tab_lstm:
         if os.path.exists(LSTM_MODEL_PATH):
             try:
                 import torch
-                lstm_data   = load_lstm_model()
-                model_lstm  = lstm_data["model"]
-                scaler_lstm = lstm_data["scaler"]
-                seq_len     = lstm_data["seq_len"]
+                lstm_data  = load_lstm_model()
+                model_lstm = lstm_data["model"]
+                seq_len    = lstm_data["seq_len"]
 
                 vals = daily["amt"].values.astype("float32").reshape(-1, 1)
                 if len(vals) < seq_len:
@@ -1084,7 +1072,7 @@ with tab_cluster:
         if cl_code:
             cl_df = cl_df[cl_df["admi_cty_no"] == cl_code]
     elif cl_district != "전체" and admin_ok:
-        cl_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(cl_district, []))
+        cl_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(cl_district, []) if d in admin_name_to_code}
         cl_df = cl_df[cl_df["admi_cty_no"].isin(cl_codes)]
     if cl_biz1 != "전체":
         cl_df = cl_df[cl_df["card_tpbuz_nm_1"] == cl_biz1]
@@ -1221,7 +1209,7 @@ with tab_ai:
                         if ai_code:
                             filtered = filtered[filtered["admi_cty_no"] == ai_code]
                     elif ai_district != "전체" and admin_ok:
-                        ai_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(ai_district, []))
+                        ai_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(ai_district, []) if d in admin_name_to_code}
                         filtered = filtered[filtered["admi_cty_no"].isin(ai_codes)]
                     if ai_biz1 != "전체":
                         filtered = filtered[filtered["card_tpbuz_nm_1"] == ai_biz1]
