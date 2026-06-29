@@ -1059,30 +1059,9 @@ with tab_lstm:
             if v >= 1e4:   return f"{v/1e4:,.0f}만원"
             return f"{v:,.0f}원"
 
-        d1, d2, d3 = st.columns(3)
+        d1, d2 = st.columns(2)
         d1.metric("기간 평균 일매출", fmt(avg_amt))
         d2.metric("기간 총 매출",     fmt(tot_amt))
-
-        # ── 업체당 매출 (중분류 선택 시 업체 수가 대분류 기준이라 부정확하므로 숨김) ──
-        store_cnt_df = load_store_counts()
-        if store_cnt_df is not None and lt_biz1 != "전체" and lt_biz2 == "전체":
-            semas_biz = CARD_TO_SEMAS_BIZ.get(lt_biz1)
-            if semas_biz:
-                sc = store_cnt_df[store_cnt_df["상권업종대분류명"] == semas_biz]
-                if lt_admi_name != "전체" and admin_ok:
-                    admi_code = str(admin_name_to_code.get(lt_admi_name, ""))
-                    sc = sc[sc["행정동코드"] == admi_code]
-                elif lt_district != "전체" and admin_ok:
-                    lt_codes_str = {str(admin_name_to_code.get(d, "")) for d in admin_district_to_dongs.get(lt_district, [])}
-                    sc = sc[sc["행정동코드"].isin(lt_codes_str)]
-                n_stores = int(sc["store_count"].sum())
-                if n_stores > 0:
-                    per_store_avg = avg_amt / n_stores
-                    d3.metric(
-                        "업체당 평균 일매출",
-                        fmt(per_store_avg),
-                        help=f"업체 수: {n_stores:,}개 ({lt_biz1} 대분류 기준, 소상공인 상가정보 2026.03)"
-                    )
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
