@@ -63,6 +63,8 @@ MODEL_INFO_PATH      = os.path.join(MODEL_DIR,   "model_info.pkl")
 LABEL_ENCODER_PATH   = os.path.join(ENCODER_DIR, "label_encoders.pkl")
 ONEHOT_ENCODER_PATH  = os.path.join(ENCODER_DIR, "onehot_encoder.pkl")
 FEATURE_COLUMNS_PATH = os.path.join(ENCODER_DIR, "feature_columns.pkl")
+LSTM_MODEL_PATH      = os.path.join(MODEL_DIR,   "lstm_model.pkl")
+CLUSTER_MODEL_PATH   = os.path.join(MODEL_DIR,   "cluster_model.pkl")
 
 GDRIVE_FILE_ID   = "1JnLZDcT0OY2bAQLcinH_eSXpzg9hS7RY"
 GDRIVE_FILE_NAME = "tbsh_gyeonggi_day_202602_hwaseungsi.csv"
@@ -537,12 +539,17 @@ except Exception:
     admin_path              = "-"
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_pred, tab_hm, tab_eda, tab_ov = st.tabs([
+tab_pred, tab_hm, tab_eda, tab_lstm, tab_cluster, tab_ai, tab_ov = st.tabs([
     "💰 매출 예측",
     "⏰ 시간대·요일 분석",
     "📊 소비 트렌드",
+    "📈 시계열 예측",
+    "👥 고객 군집 분석",
+    "📝 AI 리포트",
     "ℹ️ 데이터 정보",
 ])
+
+_mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
 
 # =====================================================
 # 4. 매출 예측 (탭 1 - 사장님 첫 화면)
@@ -651,7 +658,6 @@ with tab_pred:
 # =====================================================
 with tab_ov:
     st.subheader("학습 데이터 정보")
-    _mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
     n_files = _mi.get("n_files", len(glob.glob(os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_*.csv"))))
     first_name = os.path.basename(sales_path)
     if n_files > 1:
@@ -762,3 +768,173 @@ with tab_hm:
                        file_name="biz_hour_sales_heatmap.png", mime="image/png")
     st.dataframe(bh_tbl.round(2), width='stretch')
 
+# =====================================================
+# 📈 시계열 예측 (LSTM)
+# =====================================================
+with tab_lstm:
+    st.subheader("날짜별 매출 추이 & 미래 예측")
+    st.caption("LSTM 딥러닝 모델로 과거 매출 패턴을 학습해 향후 매출을 예측합니다.")
+
+    if not os.path.exists(LSTM_MODEL_PATH):
+        st.info("📦 LSTM 모델이 아직 없습니다. Kaggle에서 `kaggle_lstm.ipynb`를 학습한 뒤 `model/lstm_model.pkl`을 업로드해주세요.")
+    else:
+        try:
+            import torch
+            import plotly.graph_objects as go
+            lstm_data = joblib.load(LSTM_MODEL_PATH)
+            model_lstm   = lstm_data["model"]
+            scaler_lstm  = lstm_data["scaler"]
+            seq_len      = lstm_data["seq_len"]
+            history_vals = lstm_data["history"]   # numpy array (날짜별 총 매출)
+            history_dates= lstm_data["dates"]     # list of date strings
+
+            FORECAST_DAYS = st.slider("예측 기간 (일)", 7, 60, 30)
+
+            # 예측
+            model_lstm.eval()
+            last_seq = torch.tensor(scaler_lstm.transform(
+                history_vals[-seq_len:].reshape(-1,1)), dtype=torch.float32).unsqueeze(0)
+            preds = []
+            with torch.no_grad():
+                seq = last_seq.clone()
+                for _ in range(FORECAST_DAYS):
+                    out = model_lstm(seq)
+                    preds.append(out.item())
+                    next_val = out.unsqueeze(0)
+                    seq = torch.cat([seq[:,1:,:], next_val.unsqueeze(2)], dim=1)
+            pred_vals = scaler_lstm.inverse_transform(
+                [[p] for p in preds])[:,0]
+
+            last_date = pd.to_datetime(history_dates[-1])
+            future_dates = [str((last_date + pd.Timedelta(days=i+1)).date())
+                            for i in range(FORECAST_DAYS)]
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=history_dates[-90:], y=history_vals[-90:],
+                                     name="실제 매출", line=dict(color="#58a6ff")))
+            fig.add_trace(go.Scatter(x=future_dates, y=pred_vals,
+                                     name="예측 매출", line=dict(color="#3fb950", dash="dash")))
+            fig.update_layout(title="일별 매출 추이 및 예측",
+                              xaxis_title="날짜", yaxis_title="매출액 (원)",
+                              hovermode="x unified", height=420)
+            st.plotly_chart(fig, use_container_width=True)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("예측 기간 평균 매출", f"{pred_vals.mean():,.0f}원/일")
+            c2.metric("예측 최고 매출일",    f"{pred_vals.max():,.0f}원")
+            c3.metric("예측 최저 매출일",    f"{pred_vals.min():,.0f}원")
+        except Exception as e:
+            st.error(f"LSTM 모델 로드 오류: {e}")
+
+# =====================================================
+# 👥 고객 군집 분석 (Autoencoder + KMeans)
+# =====================================================
+with tab_cluster:
+    st.subheader("우리 동네 고객은 어떤 유형일까요?")
+    st.caption("Autoencoder로 소비 패턴을 압축하고 군집화해 고객 유형을 분류합니다.")
+
+    if not os.path.exists(CLUSTER_MODEL_PATH):
+        st.info("📦 군집 모델이 아직 없습니다. Kaggle에서 `kaggle_cluster.ipynb`를 학습한 뒤 `model/cluster_model.pkl`을 업로드해주세요.")
+    else:
+        try:
+            import plotly.express as px
+            cluster_data   = joblib.load(CLUSTER_MODEL_PATH)
+            cluster_labels = cluster_data["labels"]       # numpy array
+            cluster_centers= cluster_data["centers"]      # 2D (n_clusters, 2) for viz
+            cluster_stats  = cluster_data["stats"]        # DataFrame: 군집별 특성
+            cluster_names  = cluster_data.get("names", [f"유형 {i+1}" for i in range(len(cluster_stats))])
+
+            st.subheader("고객 유형별 특성")
+            st.dataframe(cluster_stats, width="stretch")
+
+            st.subheader("고객 분포 시각화")
+            viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
+            viz_df["유형"] = cluster_names
+            viz_df["비율(%)"] = cluster_data.get("ratios", [100/len(cluster_names)]*len(cluster_names))
+            fig_c = px.scatter(viz_df, x="x", y="y", size="비율(%)", color="유형",
+                               text="유형", size_max=60, height=400,
+                               title="고객 유형 분포 (Autoencoder 잠재 공간)")
+            fig_c.update_traces(textposition="top center")
+            st.plotly_chart(fig_c, use_container_width=True)
+        except Exception as e:
+            st.error(f"군집 모델 로드 오류: {e}")
+
+# =====================================================
+# 📝 AI 리포트 (Claude API)
+# =====================================================
+with tab_ai:
+    st.subheader("AI가 분석한 우리 동네 소비 리포트")
+    st.caption("데이터를 요약해 Claude AI가 사장님을 위한 인사이트 리포트를 작성합니다.")
+
+    # API 키: secrets 우선, 없으면 입력창
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", "") if hasattr(st, "secrets") else ""
+    if not api_key:
+        api_key = st.text_input("Anthropic API Key", type="password",
+                                placeholder="sk-ant-...")
+
+    # 리포트 생성 옵션
+    report_district = st.selectbox("분석할 지역", admin_district_list if admin_ok else ["전체"])
+    report_biz      = st.selectbox("분석할 업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique().tolist()))
+
+    if st.button("📝 AI 리포트 생성", type="primary"):
+        if not api_key:
+            st.warning("Anthropic API Key를 입력해주세요.")
+        else:
+            with st.spinner("Claude AI가 리포트를 작성 중입니다..."):
+                try:
+                    import anthropic
+
+                    # 데이터 요약 생성
+                    filtered = df.copy()
+                    if report_biz != "전체":
+                        filtered = filtered[filtered["card_tpbuz_nm_1"] == report_biz]
+
+                    top_biz2  = filtered.groupby("card_tpbuz_nm_2")["amt"].sum().nlargest(5)
+                    top_hour  = filtered.groupby("hour")["amt"].sum().idxmax()
+                    top_day   = filtered.groupby("day")["amt"].sum().idxmax()
+                    top_age   = filtered.groupby("age")["amt"].sum().idxmax()
+                    total_amt = filtered["amt"].sum()
+                    avg_amt   = filtered["amt"].mean()
+
+                    hour_label = HOUR_MAP.get(top_hour, str(top_hour))
+                    day_label  = DAY_MAP.get(top_day, str(top_day))
+                    age_label  = AGE_MAP.get(top_age, str(top_age))
+
+                    summary = f"""
+경기도 카드 소비 데이터 분석 요약:
+- 분석 지역: {report_district}
+- 분석 업종: {report_biz}
+- 분석 기간: {_mi.get('data_start','알 수 없음')} ~ {_mi.get('data_end','알 수 없음')}
+- 총 매출액: {total_amt:,.0f}원
+- 건당 평균 매출: {avg_amt:,.0f}원
+- 매출이 가장 높은 시간대: {hour_label}
+- 매출이 가장 높은 요일: {day_label}
+- 주요 소비 연령대: {age_label}
+- 매출 상위 업종 중분류 TOP 5: {', '.join([f'{k}({v:,.0f}원)' for k, v in top_biz2.items()])}
+"""
+
+                    client = anthropic.Anthropic(api_key=api_key)
+                    message = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=1024,
+                        messages=[{
+                            "role": "user",
+                            "content": f"""당신은 소상공인을 위한 경영 컨설턴트입니다.
+아래 경기도 카드 소비 데이터 분석 결과를 바탕으로 사장님이 바로 활용할 수 있는 인사이트 리포트를 작성해주세요.
+
+{summary}
+
+다음 형식으로 작성해주세요:
+1. 핵심 요약 (3줄 이내)
+2. 주목할 소비 패턴 (2~3가지)
+3. 사장님께 드리는 제안 (2~3가지 실용적인 조언)
+
+전문 용어보다는 사장님이 바로 이해할 수 있는 쉬운 언어로 작성해주세요."""
+                        }]
+                    )
+                    report_text = message.content[0].text
+                    st.markdown(report_text)
+                    st.download_button("리포트 저장 (텍스트)", data=report_text,
+                                       file_name="ai_report.txt", mime="text/plain")
+                except Exception as e:
+                    st.error(f"AI 리포트 생성 오류: {e}")
