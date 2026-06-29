@@ -558,7 +558,11 @@ with tab_ov:
         st.write(f"매출 데이터 파일: `{first_name}` 등 {n_files}개  /  인코딩: `{sales_enc}`")
     else:
         st.write(f"매출 데이터 파일: `{first_name}`  /  인코딩: `{sales_enc}`")
-    if "ta_ymd" in df.columns and df["ta_ymd"].notna().any():
+    data_start = _mi.get("data_start")
+    data_end   = _mi.get("data_end")
+    if data_start and data_end:
+        st.write(f"데이터 기간: `{data_start}` ~ `{data_end}`")
+    elif "ta_ymd" in df.columns and df["ta_ymd"].notna().any():
         date_min = df["ta_ymd"].min()
         date_max = df["ta_ymd"].max()
         st.write(f"데이터 기간: `{date_min.year}년 {date_min.month}월` ~ `{date_max.year}년 {date_max.month}월`")
