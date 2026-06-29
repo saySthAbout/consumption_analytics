@@ -791,7 +791,7 @@ with tab_pred:
                 )
                 st.dataframe(
                     pivot.style.format("{:,}").background_gradient(cmap="Blues", axis=None),
-                    use_container_width=True
+                    width="stretch"
                 )
 
                 # 전체 세그먼트 상세 표
@@ -802,7 +802,7 @@ with tab_pred:
                         "예상 매출(원)": "{:,}",
                         "데이터 비중(%)": "{:.1f}%",
                     }).background_gradient(subset=["건당 예측 매출(원)"], cmap="Greens"),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1041,7 +1041,7 @@ with tab_lstm:
             hovermode="x unified",
             height=440
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         avg_amt = daily["amt"].mean()
         tot_amt = daily["amt"].sum()
@@ -1137,7 +1137,7 @@ with tab_cluster:
                              labels={"amt": "매출액 (원)"}, color="amt",
                              color_continuous_scale="Blues")
             fig_age.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
-            st.plotly_chart(fig_age, use_container_width=True)
+            st.plotly_chart(fig_age, width="stretch")
 
         # 성별 매출 비중
         with ch2:
@@ -1146,7 +1146,7 @@ with tab_cluster:
             fig_sex = px.pie(sex_grp, names="성별", values="amt", title="성별 매출 비중",
                              color_discrete_map={"여성": "#f472b6", "남성": "#60a5fa"})
             fig_sex.update_layout(height=320)
-            st.plotly_chart(fig_sex, use_container_width=True)
+            st.plotly_chart(fig_sex, width="stretch")
 
         ch3, ch4 = st.columns(2)
 
@@ -1159,7 +1159,7 @@ with tab_cluster:
                               color_continuous_scale="Greens")
             fig_hour.update_layout(showlegend=False, coloraxis_showscale=False, height=320,
                                    xaxis_tickangle=-30)
-            st.plotly_chart(fig_hour, use_container_width=True)
+            st.plotly_chart(fig_hour, width="stretch")
 
         # 요일별 매출
         with ch4:
@@ -1169,7 +1169,7 @@ with tab_cluster:
                              labels={"amt": "매출액 (원)"}, color="amt",
                              color_continuous_scale="Oranges")
             fig_day.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
-            st.plotly_chart(fig_day, use_container_width=True)
+            st.plotly_chart(fig_day, width="stretch")
 
         # 업종 TOP10
         st.subheader("업종별 매출 TOP 10")
@@ -1179,7 +1179,7 @@ with tab_cluster:
         fig_biz = px.bar(top_biz, x="매출액 (원)", y="업종", orientation="h",
                          color="매출액 (원)", color_continuous_scale="Purples")
         fig_biz.update_layout(coloraxis_showscale=False, height=380, yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_biz, use_container_width=True)
+        st.plotly_chart(fig_biz, width="stretch")
 
         # Autoencoder 군집 모델 요약 (있을 때만)
         if os.path.exists(CLUSTER_MODEL_PATH):
@@ -1191,7 +1191,7 @@ with tab_cluster:
                 cluster_names = cluster_data.get("names", [])
                 cluster_centers = cluster_data["centers"]
                 ratios = cluster_data.get("ratios", [])
-                st.dataframe(cluster_stats, use_container_width=True, hide_index=True)
+                st.dataframe(cluster_stats, width="stretch", hide_index=True)
                 viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
                 viz_df["유형"] = cluster_names
                 viz_df["비율(%)"] = ratios
@@ -1199,7 +1199,7 @@ with tab_cluster:
                                    text="유형", size_max=60, height=380,
                                    title="고객 유형 분포 (잠재 공간)")
                 fig_c.update_traces(textposition="top center")
-                st.plotly_chart(fig_c, use_container_width=True)
+                st.plotly_chart(fig_c, width="stretch")
             except Exception as e:
                 st.error(f"군집 모델 로드 오류: {e}")
 
