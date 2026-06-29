@@ -899,58 +899,100 @@ with tab_hm:
 # =====================================================
 with tab_lstm:
     st.subheader("날짜별 매출 추이 & 미래 예측")
-    st.caption("LSTM 딥러닝 모델로 과거 매출 패턴을 학습해 향후 매출을 예측합니다.")
+    st.caption("조건을 선택하면 해당 지역·업종의 실제 매출 추이와 LSTM 미래 예측을 보여줍니다.")
 
-    if not os.path.exists(LSTM_MODEL_PATH):
-        st.info("📦 LSTM 모델이 아직 없습니다. Kaggle에서 `kaggle_lstm.ipynb`를 학습한 뒤 `model/lstm_model.pkl`을 업로드해주세요.")
+    # ── 필터 ──
+    lt1, lt2 = st.columns(2)
+    with lt1:
+        if admin_ok:
+            lt_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="lt_dist")
+            lt_dong_opts = ["전체"] + admin_district_to_dongs.get(lt_district, []) if lt_district != "전체" else ["전체"]
+            lt_admi_name = st.selectbox("동네 선택", lt_dong_opts, key="lt_dong")
+        else:
+            lt_district = lt_admi_name = "전체"
+    with lt2:
+        lt_biz1      = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="lt_biz1")
+        lt_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == lt_biz1]["card_tpbuz_nm_2"].dropna().unique()) if lt_biz1 != "전체" else ["전체"]
+        lt_biz2      = st.selectbox("업종 중분류", lt_biz2_opts, key="lt_biz2")
+
+    # ── 필터 적용 ──
+    lt_df = df.copy()
+    if lt_district != "전체" and lt_admi_name != "전체" and admin_ok:
+        lt_admi_code = admin_name_to_code.get(lt_admi_name)
+        if lt_admi_code:
+            lt_df = lt_df[lt_df["admi_cty_no"] == lt_admi_code]
+    elif lt_district != "전체" and admin_ok:
+        lt_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(lt_district, []))
+        lt_df = lt_df[lt_df["admi_cty_no"].isin(lt_codes)]
+    if lt_biz1 != "전체":
+        lt_df = lt_df[lt_df["card_tpbuz_nm_1"] == lt_biz1]
+    if lt_biz2 != "전체":
+        lt_df = lt_df[lt_df["card_tpbuz_nm_2"] == lt_biz2]
+
+    if "ta_ymd" not in lt_df.columns or lt_df.empty:
+        st.warning("선택 조건에 해당하는 데이터가 없습니다.")
     else:
-        try:
-            import torch
-            import plotly.graph_objects as go
-            lstm_data = joblib.load(LSTM_MODEL_PATH)
-            model_lstm   = lstm_data["model"]
-            scaler_lstm  = lstm_data["scaler"]
-            seq_len      = lstm_data["seq_len"]
-            history_vals = lstm_data["history"]   # numpy array (날짜별 총 매출)
-            history_dates= lstm_data["dates"]     # list of date strings
+        import plotly.graph_objects as go
 
-            FORECAST_DAYS = st.slider("예측 기간 (일)", 7, 60, 30)
+        # 실제 일별 매출 집계
+        lt_df["date"] = pd.to_datetime(lt_df["ta_ymd"].astype(str), format="%Y%m%d")
+        daily = lt_df.groupby("date")["amt"].sum().reset_index().sort_values("date")
 
-            # 예측
-            model_lstm.eval()
-            last_seq = torch.tensor(scaler_lstm.transform(
-                history_vals[-seq_len:].reshape(-1,1)), dtype=torch.float32).unsqueeze(0)
-            preds = []
-            with torch.no_grad():
-                seq = last_seq.clone()
-                for _ in range(FORECAST_DAYS):
-                    out = model_lstm(seq)
-                    preds.append(out.item())
-                    next_val = out.unsqueeze(1)  # [1,1] → [1,1,1]
-                    seq = torch.cat([seq[:,1:,:], next_val], dim=1)
-            pred_vals = scaler_lstm.inverse_transform(
-                [[p] for p in preds])[:,0]
+        FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
 
-            last_date = pd.to_datetime(history_dates[-1])
-            future_dates = [str((last_date + pd.Timedelta(days=i+1)).date())
-                            for i in range(FORECAST_DAYS)]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=daily["date"].astype(str), y=daily["amt"],
+            name="실제 매출", line=dict(color="#58a6ff")
+        ))
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=history_dates[-90:], y=history_vals[-90:],
-                                     name="실제 매출", line=dict(color="#58a6ff")))
-            fig.add_trace(go.Scatter(x=future_dates, y=pred_vals,
-                                     name="예측 매출", line=dict(color="#3fb950", dash="dash")))
-            fig.update_layout(title="일별 매출 추이 및 예측",
-                              xaxis_title="날짜", yaxis_title="매출액 (원)",
-                              hovermode="x unified", height=420)
-            st.plotly_chart(fig, use_container_width=True)
+        # LSTM 미래 예측 (모델 있을 때만)
+        if os.path.exists(LSTM_MODEL_PATH):
+            try:
+                import torch
+                lstm_data    = joblib.load(LSTM_MODEL_PATH)
+                model_lstm   = lstm_data["model"]
+                scaler_lstm  = lstm_data["scaler"]
+                seq_len      = lstm_data["seq_len"]
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("예측 기간 평균 매출", f"{pred_vals.mean():,.0f}원/일")
-            c2.metric("예측 최고 매출일",    f"{pred_vals.max():,.0f}원")
-            c3.metric("예측 최저 매출일",    f"{pred_vals.min():,.0f}원")
-        except Exception as e:
-            st.error(f"LSTM 모델 로드 오류: {e}")
+                vals = daily["amt"].values.astype("float32").reshape(-1, 1)
+                if len(vals) >= seq_len:
+                    scaled   = scaler_lstm.transform(vals)
+                    last_seq = torch.tensor(scaled[-seq_len:], dtype=torch.float32).unsqueeze(0)
+                    preds = []
+                    model_lstm.eval()
+                    with torch.no_grad():
+                        seq = last_seq.clone()
+                        for _ in range(FORECAST_DAYS):
+                            out = model_lstm(seq)
+                            preds.append(out.item())
+                            next_val = out.unsqueeze(1)
+                            seq = torch.cat([seq[:,1:,:], next_val], dim=1)
+                    pred_vals    = scaler_lstm.inverse_transform([[p] for p in preds])[:,0]
+                    last_date    = daily["date"].iloc[-1]
+                    future_dates = [str((last_date + pd.Timedelta(days=i+1)).date()) for i in range(FORECAST_DAYS)]
+
+                    fig.add_trace(go.Scatter(
+                        x=future_dates, y=pred_vals,
+                        name="LSTM 예측", line=dict(color="#3fb950", dash="dash")
+                    ))
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("예측 평균 일매출", f"{pred_vals.mean():,.0f}원")
+                    c2.metric("예측 최고 매출일", f"{pred_vals.max():,.0f}원")
+                    c3.metric("예측 최저 매출일", f"{pred_vals.min():,.0f}원")
+            except Exception as e:
+                st.warning(f"LSTM 예측 오류: {e}")
+
+        fig.update_layout(
+            title=f"일별 매출 추이 ({lt_district} {lt_admi_name} · {lt_biz2})",
+            xaxis_title="날짜", yaxis_title="매출액 (원)",
+            hovermode="x unified", height=440
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        d1, d2 = st.columns(2)
+        d1.metric("기간 평균 일매출", f"{daily['amt'].mean():,.0f}원")
+        d2.metric("기간 총 매출",     f"{daily['amt'].sum():,.0f}원")
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
@@ -958,33 +1000,128 @@ with tab_lstm:
 
 with tab_cluster:
     st.subheader("우리 동네 고객은 어떤 유형일까요?")
-    st.caption("Autoencoder로 소비 패턴을 압축하고 군집화해 고객 유형을 분류합니다.")
+    st.caption("조건을 선택하면 해당 지역·업종·기간의 고객 소비 패턴을 분석합니다.")
 
-    if not os.path.exists(CLUSTER_MODEL_PATH):
-        st.info("📦 군집 모델이 아직 없습니다. Kaggle에서 `kaggle_cluster.ipynb`를 학습한 뒤 `model/cluster_model.pkl`을 업로드해주세요.")
+    import plotly.express as px
+
+    # ── 필터 ──
+    cl1, cl2 = st.columns(2)
+    with cl1:
+        if admin_ok:
+            cl_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="cl_dist")
+            cl_dong_opts = ["전체"] + admin_district_to_dongs.get(cl_district, []) if cl_district != "전체" else ["전체"]
+            cl_admi_name = st.selectbox("동네 선택", cl_dong_opts, key="cl_dong")
+        else:
+            cl_district = cl_admi_name = "전체"
+        cl_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in range(1, 13)], key="cl_month")
+        all_days  = list(DAY_MAP.values())
+        cl_days   = st.multiselect("요일 (전체 선택 = 모든 요일)", all_days, default=all_days, key="cl_days")
+    with cl2:
+        cl_biz1      = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="cl_biz1")
+        cl_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == cl_biz1]["card_tpbuz_nm_2"].dropna().unique()) if cl_biz1 != "전체" else ["전체"]
+        cl_biz2      = st.selectbox("업종 중분류", cl_biz2_opts, key="cl_biz2")
+
+    # ── 필터 적용 ──
+    cl_df = df.copy()
+    if cl_district != "전체" and cl_admi_name != "전체" and admin_ok:
+        cl_code = admin_name_to_code.get(cl_admi_name)
+        if cl_code:
+            cl_df = cl_df[cl_df["admi_cty_no"] == cl_code]
+    elif cl_district != "전체" and admin_ok:
+        cl_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(cl_district, []))
+        cl_df = cl_df[cl_df["admi_cty_no"].isin(cl_codes)]
+    if cl_biz1 != "전체":
+        cl_df = cl_df[cl_df["card_tpbuz_nm_1"] == cl_biz1]
+    if cl_biz2 != "전체":
+        cl_df = cl_df[cl_df["card_tpbuz_nm_2"] == cl_biz2]
+    if cl_month != "전체":
+        cl_m = int(cl_month.replace("월", ""))
+        cl_df = cl_df[cl_df["month"] == cl_m]
+    if cl_days and len(cl_days) < len(all_days):
+        day_rev = {v: k for k, v in DAY_MAP.items()}
+        cl_day_nums = [day_rev[d] for d in cl_days]
+        cl_df = cl_df[cl_df["day"].isin(cl_day_nums)]
+
+    if cl_df.empty:
+        st.warning("선택 조건에 해당하는 데이터가 없습니다.")
     else:
-        try:
-            import plotly.express as px
-            cluster_data   = joblib.load(CLUSTER_MODEL_PATH)
-            cluster_labels = cluster_data["labels"]       # numpy array
-            cluster_centers= cluster_data["centers"]      # 2D (n_clusters, 2) for viz
-            cluster_stats  = cluster_data["stats"]        # DataFrame: 군집별 특성
-            cluster_names  = cluster_data.get("names", [f"유형 {i+1}" for i in range(len(cluster_stats))])
+        st.caption(f"분석 데이터: {len(cl_df):,}건")
 
-            st.subheader("고객 유형별 특성")
-            st.dataframe(cluster_stats, width="stretch")
+        ch1, ch2 = st.columns(2)
 
-            st.subheader("고객 분포 시각화")
-            viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
-            viz_df["유형"] = cluster_names
-            viz_df["비율(%)"] = cluster_data.get("ratios", [100/len(cluster_names)]*len(cluster_names))
-            fig_c = px.scatter(viz_df, x="x", y="y", size="비율(%)", color="유형",
-                               text="유형", size_max=60, height=400,
-                               title="고객 유형 분포 (Autoencoder 잠재 공간)")
-            fig_c.update_traces(textposition="top center")
-            st.plotly_chart(fig_c, use_container_width=True)
-        except Exception as e:
-            st.error(f"군집 모델 로드 오류: {e}")
+        # 연령대별 매출 비중
+        with ch1:
+            age_grp = cl_df.groupby("age")["amt"].sum().reset_index()
+            age_grp["연령대"] = age_grp["age"].map(AGE_MAP)
+            fig_age = px.bar(age_grp, x="연령대", y="amt", title="연령대별 매출",
+                             labels={"amt": "매출액 (원)"}, color="amt",
+                             color_continuous_scale="Blues")
+            fig_age.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
+            st.plotly_chart(fig_age, use_container_width=True)
+
+        # 성별 매출 비중
+        with ch2:
+            sex_grp = cl_df.groupby("sex")["amt"].sum().reset_index()
+            sex_grp["성별"] = sex_grp["sex"].map(SEX_MAP)
+            fig_sex = px.pie(sex_grp, names="성별", values="amt", title="성별 매출 비중",
+                             color_discrete_map={"여성": "#f472b6", "남성": "#60a5fa"})
+            fig_sex.update_layout(height=320)
+            st.plotly_chart(fig_sex, use_container_width=True)
+
+        ch3, ch4 = st.columns(2)
+
+        # 시간대별 매출
+        with ch3:
+            hour_grp = cl_df.groupby("hour")["amt"].sum().reset_index()
+            hour_grp["시간대"] = hour_grp["hour"].map(HOUR_MAP)
+            fig_hour = px.bar(hour_grp, x="시간대", y="amt", title="시간대별 매출",
+                              labels={"amt": "매출액 (원)"}, color="amt",
+                              color_continuous_scale="Greens")
+            fig_hour.update_layout(showlegend=False, coloraxis_showscale=False, height=320,
+                                   xaxis_tickangle=-30)
+            st.plotly_chart(fig_hour, use_container_width=True)
+
+        # 요일별 매출
+        with ch4:
+            day_grp = cl_df.groupby("day")["amt"].sum().reset_index()
+            day_grp["요일"] = day_grp["day"].map(DAY_MAP)
+            fig_day = px.bar(day_grp, x="요일", y="amt", title="요일별 매출",
+                             labels={"amt": "매출액 (원)"}, color="amt",
+                             color_continuous_scale="Oranges")
+            fig_day.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
+            st.plotly_chart(fig_day, use_container_width=True)
+
+        # 업종 TOP10
+        st.subheader("업종별 매출 TOP 10")
+        top_biz = (cl_df.groupby("card_tpbuz_nm_2")["amt"].sum()
+                   .nlargest(10).reset_index()
+                   .rename(columns={"card_tpbuz_nm_2": "업종", "amt": "매출액 (원)"}))
+        fig_biz = px.bar(top_biz, x="매출액 (원)", y="업종", orientation="h",
+                         color="매출액 (원)", color_continuous_scale="Purples")
+        fig_biz.update_layout(coloraxis_showscale=False, height=380, yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig_biz, use_container_width=True)
+
+        # Autoencoder 군집 모델 요약 (있을 때만)
+        if os.path.exists(CLUSTER_MODEL_PATH):
+            st.divider()
+            st.subheader("전체 고객 유형 분류 (Autoencoder 모델)")
+            try:
+                cluster_data  = joblib.load(CLUSTER_MODEL_PATH)
+                cluster_stats = cluster_data["stats"]
+                cluster_names = cluster_data.get("names", [])
+                cluster_centers = cluster_data["centers"]
+                ratios = cluster_data.get("ratios", [])
+                st.dataframe(cluster_stats, use_container_width=True, hide_index=True)
+                viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
+                viz_df["유형"] = cluster_names
+                viz_df["비율(%)"] = ratios
+                fig_c = px.scatter(viz_df, x="x", y="y", size="비율(%)", color="유형",
+                                   text="유형", size_max=60, height=380,
+                                   title="고객 유형 분포 (잠재 공간)")
+                fig_c.update_traces(textposition="top center")
+                st.plotly_chart(fig_c, use_container_width=True)
+            except Exception as e:
+                st.error(f"군집 모델 로드 오류: {e}")
 
 # =====================================================
 # 📝 AI 리포트 (OpenAI API)
