@@ -557,7 +557,7 @@ with tab_ov:
     c1.metric("행 개수",        f"{df.shape[0]:,}")
     c2.metric("열 개수",        f"{df.shape[1]:,}")
     c3.metric("총 매출액",      f"{df['amt'].sum():,.0f}원")
-    c4.metric("행정동 선택 수", f"{len(admin_name_options)}개")
+    c4.metric("행정동 선택 수", f"{len(admin_name_to_code)}개")
 
     if not admin_ok:
         st.warning("⚠️ city_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
@@ -571,7 +571,7 @@ with tab_ov:
     }), width='stretch')
 
     st.subheader("행정동 코드 데이터")
-    st.write(f"행정동 코드 CSV 로드 개수: {len(admin_df)}개  /  행정동 옵션 개수: {len(admin_name_options)}개")
+    st.write(f"행정동 코드 CSV 로드 개수: {len(admin_df)}개  /  행정동 옵션 개수: {len(admin_name_to_code)}개")
     st.dataframe(admin_df, width='stretch')
 
     st.subheader("모델 / 인코더 저장 경로 및 존재 여부")
