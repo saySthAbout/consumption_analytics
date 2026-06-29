@@ -479,6 +479,12 @@ def predict_sales(input_df):
 # =========================================================
 # 4. 시각화 함수
 # =========================================================
+def fmt(v):
+    if v >= 1e8: return f"{v/1e8:,.1f}억원"
+    if v >= 1e4: return f"{v/1e4:,.0f}만원"
+    return f"{v:,.0f}원"
+
+
 def fig_to_bytes(fig):
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
@@ -664,7 +670,7 @@ with tab_pred:
             df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
         )) if sel_biz2 and "cnt" in df.columns else 10
         sel_cnt = st.number_input(
-            f"하루 예상 거래 건수  ※ {sel_biz2} 평균: {avg_cnt}건",
+            f"시간대당 예상 거래 건수  ※ {sel_biz2} 시간대 평균: {avg_cnt}건",
             min_value=1, value=avg_cnt, step=1
         )
 
@@ -688,12 +694,13 @@ with tab_pred:
             )
             active_hours = int(ref["hour"].nunique()) if not ref.empty else 10
 
-            # 모든 (시간대 × 성별 × 연령) 조합으로 예측 후 평균 건당 매출 계산
-            preds = []
+            # (시간대 × 성별 × 연령) 조합별 예측 — 캐시해서 세그먼트 표에 재사용
+            pred_cache = {}
             for _, row in combos.iterrows():
+                h, s, a = int(row["hour"]), row["sex"], int(row["age"])
                 input_row = pd.DataFrame([{
-                    "sex": row["sex"], "age": int(row["age"]),
-                    "day": sel_day, "hour": int(row["hour"]),
+                    "sex": s, "age": a,
+                    "day": sel_day, "hour": h,
                     "month": sel_month, "admi_cty_no": sel_admi,
                     "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
                     "cnt": sel_cnt,
@@ -702,19 +709,21 @@ with tab_pred:
                     encoded  = transform_with_saved_encoders(input_row)
                     raw_pred = model.predict(encoded)[0]
                     p = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
-                    preds.append(p)
                 except Exception:
-                    pass
+                    p = 0.0
+                pred_cache[(h, s, a)] = p
 
-            # 전체 조합의 평균 건당 매출
-            avg_per_txn = float(np.mean(preds)) if preds else 0.0
+            preds = list(pred_cache.values())
 
-            # 하루 예상 매출 = 평균 건당 매출 × 시간대당 거래건수 × 하루 활성 시간대수
-            daily_total_cnt = sel_cnt * active_hours
-            daily_pred      = avg_per_txn * daily_total_cnt
+            # 하루 예상 매출 = 각 (시간대×성별×연령) 조합 예측값의 합
+            # (각 조합 예측값 = 해당 시간대에 sel_cnt건 거래 시 예상 매출)
+            daily_pred  = sum(preds)
+            avg_per_grp = float(np.mean(preds)) if preds else 0.0
 
-            # 비교 기준: 실제 데이터 해당 업종 평균 일매출 (전체 amt ÷ 전체 날짜 수)
+            # 비교 기준: 선택 동네 + 업종의 실제 일평균 매출
             area_mask = df["card_tpbuz_nm_2"] == sel_biz2
+            if sel_admi:
+                area_mask = area_mask & (df["admi_cty_no"] == sel_admi)
             if area_mask.any():
                 total_days = df.loc[area_mask, "ta_ymd"].nunique() if "ta_ymd" in df.columns else 30
                 area_daily_avg = df.loc[area_mask, "amt"].sum() / max(total_days, 1)
@@ -722,24 +731,25 @@ with tab_pred:
                 area_daily_avg = None
 
             # 결과 표시
-            st.success(f"### 하루 예상 매출: **{daily_pred:,.0f}원**")
+            st.success(f"### 하루 예상 매출: **{fmt(daily_pred)}**")
             c1, c2, c3 = st.columns(3)
-            c1.metric("건당 평균 매출", f"{avg_per_txn:,.0f}원")
-            c2.metric("하루 예상 거래건수", f"{daily_total_cnt}건 ({sel_cnt}건 × {active_hours}시간대)")
+            c1.metric("조합당 평균 예측 매출", fmt(avg_per_grp))
+            c2.metric("분석에 사용된 조합 수", f"{len(preds)}개 (시간대×성별×연령)")
             c3.metric("분석 업종", sel_biz2)
 
             if area_daily_avg:
                 diff_pct = (daily_pred - area_daily_avg) / area_daily_avg * 100
                 arrow = "▲" if diff_pct >= 0 else "▼"
                 color = "🟢" if diff_pct >= 0 else "🔴"
-                st.info(f"{color} 해당 업종 평균 일매출({area_daily_avg:,.0f}원)보다 {arrow} {abs(diff_pct):.1f}% {'높은 수준입니다' if diff_pct >= 0 else '낮은 수준입니다'}")
+                loc_txt = f"{sel_admi_name} " if sel_admi else ""
+                st.info(f"{color} {loc_txt}{sel_biz2} 실제 일평균({fmt(area_daily_avg)})보다 {arrow} {abs(diff_pct):.1f}% {'높은 수준입니다' if diff_pct >= 0 else '낮은 수준입니다'}")
 
             with st.expander("계산 과정 보기"):
                 st.text(f"- 예측에 사용된 조합 수: {len(preds)}개 (시간대 × 성별 × 연령)")
-                st.text(f"- 건당 평균 예측 매출: {avg_per_txn:,.0f}원")
-                st.text(f"- 시간대당 거래건수: {sel_cnt}건")
+                st.text(f"- 시간대당 거래건수(입력값): {sel_cnt}건")
                 st.text(f"- 하루 활성 시간대: {active_hours}개 (실제 데이터 기준)")
-                st.text(f"- 하루 예상 매출 = {avg_per_txn:,.0f}원 × {sel_cnt}건 × {active_hours}시간대 = {daily_pred:,.0f}원")
+                st.text(f"- 하루 예상 매출 = 각 조합 예측값 합계 = {fmt(daily_pred)}")
+                st.text(f"  (각 조합: 해당 시간대에 {sel_cnt}건 거래 시 예상 매출을 예측 후 합산)")
 
             st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
 
@@ -751,33 +761,18 @@ with tab_pred:
             total_ref_cnt = len(ref)
             for _, combo in combos.iterrows():
                 h, s, a = int(combo["hour"]), combo["sex"], int(combo["age"])
-                # 해당 조합의 실제 데이터 비중
-                seg_mask = (ref["hour"] == h) & (ref["sex"] == s) & (ref["age"] == a)
-                seg_cnt  = seg_mask.sum()
+                seg_mask  = (ref["hour"] == h) & (ref["sex"] == s) & (ref["age"] == a)
+                seg_cnt   = seg_mask.sum()
                 seg_ratio = seg_cnt / total_ref_cnt * 100 if total_ref_cnt > 0 else 0
-
-                # 예측
-                input_row = pd.DataFrame([{
-                    "sex": s, "age": a, "day": sel_day, "hour": h,
-                    "month": sel_month, "admi_cty_no": sel_admi,
-                    "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-                    "cnt": sel_cnt,
-                }])
-                try:
-                    enc = transform_with_saved_encoders(input_row)
-                    rp  = model.predict(enc)[0]
-                    p   = max(np.expm1(rp) if model_info.get("use_log_target", True) else rp, 0)
-                except Exception:
-                    p = 0.0
+                p = pred_cache.get((h, s, a), 0.0)  # 이미 계산된 예측값 재사용
 
                 seg_rows.append({
-                    "시간대":     HOUR_MAP.get(h, str(h)),
-                    "성별":       "여성" if s == "F" else "남성",
-                    "연령대":     AGE_MAP.get(a, f"{a}"),
-                    "건당 예측 매출(원)": int(p),
-                    "거래 건수":  sel_cnt,
-                    "예상 매출(원)":      int(p * sel_cnt),
-                    "데이터 비중(%)":     round(seg_ratio, 1),
+                    "시간대":            HOUR_MAP.get(h, str(h)),
+                    "성별":              "여성" if s == "F" else "남성",
+                    "연령대":            AGE_MAP.get(a, f"{a}"),
+                    "조합 예측 매출(원)": int(p),
+                    "거래 건수":         sel_cnt,
+                    "데이터 비중(%)":    round(seg_ratio, 1),
                 })
 
             if seg_rows:
@@ -787,10 +782,10 @@ with tab_pred:
                     .reset_index(drop=True)
                 )
 
-                # 요약 피벗: 연령대 × 성별 건당 매출 평균
-                st.markdown("**연령대 × 성별 건당 평균 예측 매출 (원)**")
+                # 요약 피벗: 연령대 × 성별 조합 예측 매출 평균
+                st.markdown("**연령대 × 성별 조합 평균 예측 매출 (원)**")
                 pivot = (
-                    seg_df.groupby(["연령대", "성별"])["건당 예측 매출(원)"]
+                    seg_df.groupby(["연령대", "성별"])["조합 예측 매출(원)"]
                     .mean()
                     .round(0)
                     .astype(int)
@@ -806,10 +801,9 @@ with tab_pred:
                 st.markdown("**시간대 × 성별 × 연령대 상세**")
                 st.dataframe(
                     seg_df.style.format({
-                        "건당 예측 매출(원)": "{:,}",
-                        "예상 매출(원)": "{:,}",
+                        "조합 예측 매출(원)": "{:,}",
                         "데이터 비중(%)": "{:.1f}%",
-                    }).background_gradient(subset=["건당 예측 매출(원)"], cmap="Greens"),
+                    }).background_gradient(subset=["조합 예측 매출(원)"], cmap="Greens"),
                     width="stretch",
                     hide_index=True,
                 )
@@ -1021,9 +1015,9 @@ with tab_lstm:
                         name="LSTM 예측", line=dict(color="#3fb950", dash="dash")
                     ))
                     c1, c2, c3 = st.columns(3)
-                    c1.metric("예측 평균 일매출", f"{pred_vals.mean():,.0f}원")
-                    c2.metric("예측 최고 매출일", f"{pred_vals.max():,.0f}원")
-                    c3.metric("예측 최저 매출일", f"{pred_vals.min():,.0f}원")
+                    c1.metric("예측 평균 일매출", fmt(pred_vals.mean()))
+                    c2.metric("예측 최고 매출일", fmt(pred_vals.max()))
+                    c3.metric("예측 최저 매출일", fmt(pred_vals.min()))
             except Exception as e:
                 st.warning(f"LSTM 예측 오류: {e}")
 
@@ -1053,11 +1047,6 @@ with tab_lstm:
 
         avg_amt = daily["amt"].mean()
         tot_amt = daily["amt"].sum()
-
-        def fmt(v):
-            if v >= 1e8:   return f"{v/1e8:,.1f}억원"
-            if v >= 1e4:   return f"{v/1e4:,.0f}만원"
-            return f"{v:,.0f}원"
 
         d1, d2 = st.columns(2)
         d1.metric("기간 평균 일매출", fmt(avg_amt))
