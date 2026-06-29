@@ -10,6 +10,8 @@ import streamlit as st
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.graph_objects as go
+import plotly.express as px
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
@@ -929,14 +931,14 @@ with tab_lstm:
     if lt_biz2 != "전체":
         lt_df = lt_df[lt_df["card_tpbuz_nm_2"] == lt_biz2]
 
-    if "ta_ymd" not in lt_df.columns or lt_df.empty:
+    if lt_df.empty:
         st.warning("선택 조건에 해당하는 데이터가 없습니다.")
     else:
-        import plotly.graph_objects as go
-
-        # 실제 일별 매출 집계
-        lt_df["date"] = pd.to_datetime(lt_df["ta_ymd"].astype(str), format="%Y%m%d")
-        daily = lt_df.groupby("date")["amt"].sum().reset_index().sort_values("date")
+        # ta_ymd는 로드 시 이미 datetime으로 변환됨
+        date_col = "ta_ymd" if "ta_ymd" in lt_df.columns else "date"
+        lt_df["_date"] = pd.to_datetime(lt_df[date_col], errors="coerce")
+        daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
+        daily = daily.rename(columns={"_date": "date"})
 
         FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
 
@@ -1001,8 +1003,6 @@ with tab_lstm:
 with tab_cluster:
     st.subheader("우리 동네 고객은 어떤 유형일까요?")
     st.caption("조건을 선택하면 해당 지역·업종·기간의 고객 소비 패턴을 분석합니다.")
-
-    import plotly.express as px
 
     # ── 필터 ──
     cl1, cl2 = st.columns(2)
@@ -1175,8 +1175,6 @@ with tab_ai:
                     if filtered.empty:
                         st.warning("선택 조건에 해당하는 데이터가 없습니다.")
                     else:
-
-                    # 데이터 요약 생성
                         top_biz2  = filtered.groupby("card_tpbuz_nm_2")["amt"].sum().nlargest(5)
                         top_hour  = filtered.groupby("hour")["amt"].sum().idxmax()
                         top_day   = filtered.groupby("day")["amt"].sum().idxmax()
