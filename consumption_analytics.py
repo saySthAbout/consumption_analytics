@@ -543,11 +543,11 @@ with tab_ov:
         st.warning("⚠️ city_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
 
     st.subheader(f"모델 입력 변수 ({len(MODEL_FEATURES)}개)")
+    enc_map = {c: "Label Encoding" for c in NUM_COLS}
+    enc_map.update({c: "Label Encoding (LightGBM 카테고리)" for c in CAT_COLS})
     st.dataframe(pd.DataFrame({
         "변수명": MODEL_FEATURES,
-        "인코딩 방식": ["One-Hot Encoding", "Label Encoding", "Label Encoding",
-                       "Label Encoding", "Label Encoding", "One-Hot Encoding",
-                       "One-Hot Encoding", "One-Hot Encoding"],
+        "인코딩 방식": [enc_map.get(c, "Label Encoding") for c in MODEL_FEATURES],
     }), width='stretch')
 
     st.subheader("행정동 코드 데이터")
