@@ -733,7 +733,8 @@ with tab_pred:
 
             pred = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
             pred = max(pred, 0)
-            st.success(f"예상 매출액: {pred:,.0f}원")
+            per_txn = pred / sel_cnt if sel_cnt > 0 else 0
+            st.success(f"예상 매출액: {pred:,.0f}원  (건당 평균 {per_txn:,.0f}원 × {sel_cnt}건)")
         except Exception as e:
             st.error(f"예측 오류: {e}")
 
