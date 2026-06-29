@@ -393,8 +393,17 @@ def train_and_save_model(df, sample_size=100000, use_log_target=True, model_name
     return model, model_info, X_test, y_test_real, pred_real
 
 
+@st.cache_resource
 def load_saved_model():
     return joblib.load(SALES_MODEL_PATH), joblib.load(MODEL_INFO_PATH)
+
+@st.cache_resource
+def load_lstm_model():
+    return joblib.load(LSTM_MODEL_PATH)
+
+@st.cache_resource
+def load_cluster_model():
+    return joblib.load(CLUSTER_MODEL_PATH)
 
 
 def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use_log_target):
@@ -952,14 +961,19 @@ with tab_lstm:
         if os.path.exists(LSTM_MODEL_PATH):
             try:
                 import torch
-                lstm_data    = joblib.load(LSTM_MODEL_PATH)
-                model_lstm   = lstm_data["model"]
-                scaler_lstm  = lstm_data["scaler"]
-                seq_len      = lstm_data["seq_len"]
+                lstm_data   = load_lstm_model()
+                model_lstm  = lstm_data["model"]
+                scaler_lstm = lstm_data["scaler"]
+                seq_len     = lstm_data["seq_len"]
 
                 vals = daily["amt"].values.astype("float32").reshape(-1, 1)
-                if len(vals) >= seq_len:
-                    scaled   = scaler_lstm.transform(vals)
+                if len(vals) < seq_len:
+                    st.caption(f"ℹ️ 데이터가 {len(vals)}일치로 예측에 필요한 {seq_len}일보다 부족해 LSTM 예측을 생략합니다.")
+                else:
+                    # 필터된 데이터 스케일로 자체 정규화 (전체 스케일러 대신)
+                    from sklearn.preprocessing import MinMaxScaler
+                    local_scaler = MinMaxScaler()
+                    scaled   = local_scaler.fit_transform(vals)
                     last_seq = torch.tensor(scaled[-seq_len:], dtype=torch.float32).unsqueeze(0)
                     preds = []
                     model_lstm.eval()
@@ -970,7 +984,8 @@ with tab_lstm:
                             preds.append(out.item())
                             next_val = out.unsqueeze(1)
                             seq = torch.cat([seq[:,1:,:], next_val], dim=1)
-                    pred_vals    = scaler_lstm.inverse_transform([[p] for p in preds])[:,0]
+                    pred_vals    = local_scaler.inverse_transform([[p] for p in preds])[:,0]
+                    pred_vals    = np.clip(pred_vals, 0, None)
                     last_date    = daily["date"].iloc[-1]
                     future_dates = [str((last_date + pd.Timedelta(days=i+1)).date()) for i in range(FORECAST_DAYS)]
 
@@ -1106,7 +1121,7 @@ with tab_cluster:
             st.divider()
             st.subheader("전체 고객 유형 분류 (Autoencoder 모델)")
             try:
-                cluster_data  = joblib.load(CLUSTER_MODEL_PATH)
+                cluster_data  = load_cluster_model()
                 cluster_stats = cluster_data["stats"]
                 cluster_names = cluster_data.get("names", [])
                 cluster_centers = cluster_data["centers"]
