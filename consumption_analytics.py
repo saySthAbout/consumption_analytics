@@ -634,7 +634,7 @@ with tab_pred:
         try:
             model, model_info = load_saved_model()
 
-            # 선택 조건에 맞는 데이터로 대표 성별·연령·시간대 자동 계산
+            # 선택 조건에 맞는 실제 데이터 필터링
             ref_mask = (
                 (df["card_tpbuz_nm_2"] == sel_biz2) &
                 (df["day"] == sel_day) &
@@ -642,30 +642,40 @@ with tab_pred:
             )
             ref = df[ref_mask] if ref_mask.sum() >= 10 else df[df["card_tpbuz_nm_2"] == sel_biz2]
 
-            top_sex  = str(ref["sex"].mode()[0])  if not ref.empty else "M"
-            top_age  = int(ref["age"].mode()[0])  if not ref.empty else 4
-            top_hour = int(ref["hour"].mode()[0]) if not ref.empty else 5
-
-            # 해당 업종의 하루 활성 시간대 수 (실제 데이터 기준)
+            # 실제 데이터에 존재하는 시간대·성별·연령 조합 추출
+            combos = (
+                ref[["hour", "sex", "age"]]
+                .drop_duplicates()
+                .dropna()
+            )
             active_hours = int(ref["hour"].nunique()) if not ref.empty else 10
 
-            # 모델 예측: 대표 고객(성별·연령·최빈 시간대) 기준 건당 매출
-            input_row = pd.DataFrame([{
-                "sex": top_sex, "age": top_age, "day": sel_day, "hour": top_hour,
-                "month": sel_month, "admi_cty_no": sel_admi,
-                "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-                "cnt": sel_cnt,
-            }])
-            encoded  = transform_with_saved_encoders(input_row)
-            raw_pred = model.predict(encoded)[0]
-            per_txn  = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
+            # 모든 (시간대 × 성별 × 연령) 조합으로 예측 후 평균 건당 매출 계산
+            preds = []
+            for _, row in combos.iterrows():
+                input_row = pd.DataFrame([{
+                    "sex": row["sex"], "age": int(row["age"]),
+                    "day": sel_day, "hour": int(row["hour"]),
+                    "month": sel_month, "admi_cty_no": sel_admi,
+                    "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+                    "cnt": sel_cnt,
+                }])
+                try:
+                    encoded  = transform_with_saved_encoders(input_row)
+                    raw_pred = model.predict(encoded)[0]
+                    p = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
+                    preds.append(p)
+                except Exception:
+                    pass
 
-            # 하루 예상 매출 = 건당 매출 × 시간대당 거래건수 × 하루 활성 시간대수
+            # 전체 조합의 평균 건당 매출
+            avg_per_txn = float(np.mean(preds)) if preds else 0.0
+
+            # 하루 예상 매출 = 평균 건당 매출 × 시간대당 거래건수 × 하루 활성 시간대수
             daily_total_cnt = sel_cnt * active_hours
-            daily_pred      = per_txn * daily_total_cnt
+            daily_pred      = avg_per_txn * daily_total_cnt
 
-            # 비교 기준: 실제 데이터의 해당 업종 평균 일매출
-            # (전체 amt 합 ÷ 전체 날짜 수)
+            # 비교 기준: 실제 데이터 해당 업종 평균 일매출 (전체 amt ÷ 전체 날짜 수)
             area_mask = df["card_tpbuz_nm_2"] == sel_biz2
             if area_mask.any():
                 total_days = df.loc[area_mask, "ta_ymd"].nunique() if "ta_ymd" in df.columns else 30
@@ -676,7 +686,7 @@ with tab_pred:
             # 결과 표시
             st.success(f"### 하루 예상 매출: **{daily_pred:,.0f}원**")
             c1, c2, c3 = st.columns(3)
-            c1.metric("건당 예측 매출", f"{per_txn:,.0f}원")
+            c1.metric("건당 평균 매출", f"{avg_per_txn:,.0f}원")
             c2.metric("하루 예상 거래건수", f"{daily_total_cnt}건 ({sel_cnt}건 × {active_hours}시간대)")
             c3.metric("분석 업종", sel_biz2)
 
@@ -687,11 +697,11 @@ with tab_pred:
                 st.info(f"{color} 해당 업종 평균 일매출({area_daily_avg:,.0f}원)보다 {arrow} {abs(diff_pct):.1f}% {'높은 수준입니다' if diff_pct >= 0 else '낮은 수준입니다'}")
 
             with st.expander("계산 과정 보기"):
-                st.write(f"- 대표 고객: {AGE_MAP.get(top_age, top_age)}대 · {'여성' if top_sex == 'F' else '남성'} · {HOUR_MAP.get(top_hour, top_hour)} 시간대")
-                st.write(f"- 건당 예측 매출: **{per_txn:,.0f}원**")
-                st.write(f"- 시간대당 거래건수: **{sel_cnt}건**")
-                st.write(f"- 하루 활성 시간대: **{active_hours}개** (실제 데이터 기준)")
-                st.write(f"- 하루 예상 매출 = {per_txn:,.0f}원 × {sel_cnt}건 × {active_hours}시간대 = **{daily_pred:,.0f}원**")
+                st.text(f"- 예측에 사용된 조합 수: {len(preds)}개 (시간대 × 성별 × 연령)")
+                st.text(f"- 건당 평균 예측 매출: {avg_per_txn:,.0f}원")
+                st.text(f"- 시간대당 거래건수: {sel_cnt}건")
+                st.text(f"- 하루 활성 시간대: {active_hours}개 (실제 데이터 기준)")
+                st.text(f"- 하루 예상 매출 = {avg_per_txn:,.0f}원 × {sel_cnt}건 × {active_hours}시간대 = {daily_pred:,.0f}원")
 
             st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
 
