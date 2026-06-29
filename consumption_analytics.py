@@ -1063,9 +1063,9 @@ with tab_lstm:
         d1.metric("기간 평균 일매출", fmt(avg_amt))
         d2.metric("기간 총 매출",     fmt(tot_amt))
 
-        # ── 업체당 매출 ──
+        # ── 업체당 매출 (중분류 선택 시 업체 수가 대분류 기준이라 부정확하므로 숨김) ──
         store_cnt_df = load_store_counts()
-        if store_cnt_df is not None and lt_biz1 != "전체":
+        if store_cnt_df is not None and lt_biz1 != "전체" and lt_biz2 == "전체":
             semas_biz = CARD_TO_SEMAS_BIZ.get(lt_biz1)
             if semas_biz:
                 sc = store_cnt_df[store_cnt_df["상권업종대분류명"] == semas_biz]
@@ -1079,9 +1079,9 @@ with tab_lstm:
                 if n_stores > 0:
                     per_store_avg = avg_amt / n_stores
                     d3.metric(
-                        f"업체당 평균 일매출",
+                        "업체당 평균 일매출",
                         fmt(per_store_avg),
-                        help=f"해당 조건 업체 수: {n_stores:,}개 (소상공인 상가정보 2026.03 기준)"
+                        help=f"업체 수: {n_stores:,}개 ({lt_biz1} 대분류 기준, 소상공인 상가정보 2026.03)"
                     )
 
 # =====================================================
