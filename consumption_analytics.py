@@ -496,8 +496,7 @@ def plot_actual_pred(y_true, y_pred):
 # 5. Streamlit 화면
 # =========================================================
 st.title("경기도 소비 트렌드 분석 및 매출 예측 AI")
-st.caption("성별, 연령, 요일, 시간대, 행정동, 업종을 입력하면 예상 매출금액을 예측합니다.")
-st.caption(f"실행 경로: {BASE_DIR}")
+st.caption("경기도 카드 소비 데이터 기반 · 소상공인을 위한 매출 예측 서비스")
 
 # ── 사이드바 ─────────────────────────────────────────────
 st.sidebar.header("설정")
@@ -538,19 +537,120 @@ except Exception:
     admin_path              = "-"
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_ov, tab_eda, tab_hm, tab_pred, tab_report = st.tabs([
-    "1. 데이터 개요",
-    "2. 탐색적 데이터 분석",
-    "3. Heatmap",
-    "4. 매출 예측",
-    "5. 보고서 문구",
+tab_pred, tab_hm, tab_eda, tab_ov = st.tabs([
+    "💰 매출 예측",
+    "⏰ 시간대·요일 분석",
+    "📊 소비 트렌드",
+    "ℹ️ 데이터 정보",
 ])
 
 # =====================================================
-# 1. 데이터 개요
+# 4. 매출 예측 (탭 1 - 사장님 첫 화면)
+# =====================================================
+with tab_pred:
+    st.subheader("우리 가게 예상 매출은 얼마일까요?")
+    st.caption("성별, 연령, 요일, 시간대, 동네, 업종을 선택하면 예상 매출액을 알려드립니다.")
+
+    p1, p2 = st.columns(2)
+
+    with p1:
+        sel_sex_label  = st.selectbox("고객 성별",   ["남성", "여성"])
+        sel_sex        = SEX_REVERSE_MAP[sel_sex_label]
+
+        sel_age_label  = st.selectbox("고객 연령대", list(AGE_MAP.values()), index=3)
+        sel_age        = {v: k for k, v in AGE_MAP.items()}[sel_age_label]
+
+        sel_day_label  = st.selectbox("요일",        list(DAY_MAP.values()), index=4)
+        sel_day        = {v: k for k, v in DAY_MAP.items()}[sel_day_label]
+
+        sel_hour_label = st.selectbox("시간대",      list(HOUR_MAP.values()), index=4)
+        sel_hour       = {v: k for k, v in HOUR_MAP.items()}[sel_hour_label]
+
+        sel_month      = st.selectbox("월", list(range(1, 13)), index=0,
+                                      format_func=lambda x: f"{x}월")
+
+    with p2:
+        if admin_ok:
+            sel_district  = st.selectbox("지역 (시/구)", admin_district_list)
+            dong_opts     = admin_district_to_dongs.get(sel_district, [])
+            sel_admi_name = st.selectbox("동네 선택", dong_opts)
+            sel_admi      = admin_name_to_code.get(sel_admi_name, 0)
+        else:
+            st.warning("⚠️ 행정동 코드 파일 없음")
+            fallback_opts = sorted(df["admi_cty_no"].dropna().astype(str).unique().tolist())
+            sel_admi_name = st.selectbox("동네", fallback_opts)
+            sel_admi      = int(sel_admi_name)
+
+        sel_biz1 = st.selectbox("업종 대분류",
+                                sorted(df["card_tpbuz_nm_1"].dropna().unique()))
+        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"]
+                           .dropna().unique())
+        if not biz2_opts:
+            st.warning("선택한 대분류에 해당하는 중분류가 없습니다.")
+            sel_biz2 = None
+        else:
+            sel_biz2 = st.selectbox("업종 중분류", biz2_opts)
+
+        avg_cnt = int(round(
+            df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
+        )) if sel_biz2 and "cnt" in df.columns else 10
+        sel_cnt = st.number_input(
+            f"예상 거래 건수  ※ {sel_biz2} 평균: {avg_cnt}건",
+            min_value=1, value=avg_cnt, step=1
+        )
+
+        if sel_biz2 is not None:
+            input_df = pd.DataFrame([{
+                "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
+                "month": sel_month, "admi_cty_no": sel_admi,
+                "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+                "cnt": sel_cnt,
+            }])
+
+            st.subheader("입력 조건 확인")
+            st.dataframe(pd.DataFrame([{
+                "성별": sel_sex_label, "연령대": sel_age_label, "요일": sel_day_label,
+                "시간대": sel_hour_label, "월": f"{sel_month}월",
+                "동네": sel_admi_name,
+                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2, "거래건수": sel_cnt,
+            }]), width='stretch')
+        else:
+            input_df = None
+
+    if st.button("예상 매출액 예측하기", type="primary") and input_df is not None:
+        try:
+            model, model_info = load_saved_model()
+            encoded = transform_with_saved_encoders(input_df)
+
+            with st.expander("🔍 상세 디버그 정보"):
+                st.write("원본 입력값:", input_df.to_dict(orient="records")[0])
+                raw_pred = model.predict(encoded)[0]
+                st.write(f"모델 raw 출력 (log 공간): {raw_pred:.6f}")
+                st.write(f"use_log_target: {model_info.get('use_log_target')}")
+                st.dataframe(encoded, width='stretch')
+
+            pred    = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
+            pred    = max(pred, 0)
+            per_txn = pred / sel_cnt if sel_cnt > 0 else 0
+
+            # 동네·업종 평균 매출과 비교
+            mask = (df["card_tpbuz_nm_2"] == sel_biz2) if sel_biz2 else pd.Series([False]*len(df))
+            area_avg = df.loc[mask, "amt"].mean() if mask.any() else None
+
+            st.success(f"예상 매출액: **{pred:,.0f}원**  (건당 평균 {per_txn:,.0f}원 × {sel_cnt}건)")
+            if area_avg:
+                diff_pct = (pred - area_avg) / area_avg * 100
+                arrow = "▲" if diff_pct >= 0 else "▼"
+                color = "🟢" if diff_pct >= 0 else "🔴"
+                st.info(f"{color} 해당 업종 전체 평균({area_avg:,.0f}원)보다 {arrow} {abs(diff_pct):.1f}% {'높습니다' if diff_pct >= 0 else '낮습니다'}")
+        except Exception as e:
+            st.error(f"예측 오류: {e}")
+
+# =====================================================
+# ℹ️ 데이터 정보 (구 탭1)
 # =====================================================
 with tab_ov:
-    st.subheader("1. 데이터 수집 및 임포팅")
+    st.subheader("학습 데이터 정보")
     _mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
     n_files = _mi.get("n_files", len(glob.glob(os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_*.csv"))))
     first_name = os.path.basename(sales_path)
@@ -569,15 +669,15 @@ with tab_ov:
     st.write(f"행정동 코드 파일: `{admin_path}`  /  인코딩: `{admin_enc}`")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("행 개수",        f"{df.shape[0]:,}")
-    c2.metric("열 개수",        f"{df.shape[1]:,}")
+    c1.metric("총 거래 건수",   f"{df.shape[0]:,}")
+    c2.metric("데이터 항목 수", f"{df.shape[1]:,}")
     c3.metric("총 매출액",      f"{df['amt'].sum():,.0f}원")
-    c4.metric("행정동 선택 수", f"{len(admin_name_to_code)}개")
+    c4.metric("행정동 수",      f"{len(admin_name_to_code)}개")
 
     if not admin_ok:
         st.warning("⚠️ city_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
 
-    st.subheader(f"모델 입력 변수 ({len(MODEL_FEATURES)}개)")
+    st.subheader("AI 모델 정보")
     enc_map = {c: "Label Encoding" for c in NUM_COLS}
     enc_map.update({c: "Label Encoding (LightGBM 카테고리)" for c in CAT_COLS})
     st.dataframe(pd.DataFrame({
@@ -585,11 +685,11 @@ with tab_ov:
         "인코딩 방식": [enc_map.get(c, "Label Encoding") for c in MODEL_FEATURES],
     }), width='stretch')
 
-    st.subheader("행정동 코드 데이터")
+    st.subheader("행정동 목록")
     st.write(f"행정동 코드 CSV 로드 개수: {len(admin_df)}개  /  행정동 옵션 개수: {len(admin_name_to_code)}개")
     st.dataframe(admin_df, width='stretch')
 
-    st.subheader("모델 / 인코더 저장 경로 및 존재 여부")
+    st.subheader("모델 파일 상태")
     paths_check = [SALES_MODEL_PATH, MODEL_INFO_PATH,
                    LABEL_ENCODER_PATH, ONEHOT_ENCODER_PATH, FEATURE_COLUMNS_PATH]
     st.dataframe(pd.DataFrame({
@@ -597,14 +697,14 @@ with tab_ov:
         "존재 여부": [os.path.exists(p) for p in paths_check],
     }), width='stretch')
 
-    st.subheader("매출 데이터 미리보기")
+    st.subheader("원본 데이터 미리보기")
     st.dataframe(df.head(30), width='stretch')
 
 # =====================================================
-# 2. 탐색적 데이터 분석
+# 📊 소비 트렌드 (구 탭2)
 # =====================================================
 with tab_eda:
-    st.subheader("2.1 결측치 및 중복값 통계")
+    st.subheader("소비 데이터 현황")
     missing_df = pd.DataFrame({
         "컬럼명":       df.columns,
         "결측치 개수":  df.isnull().sum().values,
@@ -615,11 +715,11 @@ with tab_eda:
     c2.metric("중복 행 개수",     f"{int(df.duplicated().sum()):,}")
     st.dataframe(missing_df, width='stretch')
 
-    st.subheader("2.2 주요 변수 기술통계")
+    st.subheader("주요 지표 통계")
     disp_cols = [c for c in ["amt","cnt","log_amt","log_cnt"] if c in df.columns]
     st.dataframe(df[disp_cols].describe().T, width='stretch')
 
-    st.subheader("2.3 주요 변수별 데이터 분포 (Histogram)")
+    st.subheader("매출 분포")
     with st.spinner("히스토그램 생성 중..."):
         hist_fig = plot_histograms(df)
     st.pyplot(hist_fig)
@@ -627,10 +727,10 @@ with tab_eda:
                        file_name="histogram_amt_log_amt.png", mime="image/png")
 
 # =====================================================
-# 3. Heatmap 분석
+# ⏰ 시간대·요일 분석 (구 탭3)
 # =====================================================
 with tab_hm:
-    st.subheader("3.1 수치형 변수 상관관계 Heatmap")
+    st.subheader("언제 매출이 높을까요?")
     with st.spinner("상관관계 Heatmap 생성 중..."):
         corr_fig, corr_df = plot_corr_heatmap(df)
     st.pyplot(corr_fig)
@@ -638,7 +738,7 @@ with tab_hm:
                        file_name="correlation_heatmap.png", mime="image/png")
     st.dataframe(corr_df.round(3), width='stretch')
 
-    st.subheader("3.2 연령대 × 시간대 소비 Heatmap")
+    st.subheader("연령대별 · 시간대별 소비 현황")
     with st.spinner("연령대 × 시간대 Heatmap 생성 중..."):
         ah_fig, ah_tbl = plot_age_hour_heatmap(df)
     st.pyplot(ah_fig)
@@ -646,7 +746,7 @@ with tab_hm:
                        file_name="age_hour_sales_heatmap.png", mime="image/png")
     st.dataframe(ah_tbl.round(2), width='stretch')
 
-    st.subheader("3.3 요일 × 시간대 소비 Heatmap")
+    st.subheader("요일 · 시간대별 소비 현황")
     with st.spinner("요일 × 시간대 Heatmap 생성 중..."):
         dh_fig, dh_tbl = plot_day_hour_heatmap(df)
     st.pyplot(dh_fig)
@@ -654,7 +754,7 @@ with tab_hm:
                        file_name="day_hour_sales_heatmap.png", mime="image/png")
     st.dataframe(dh_tbl.round(2), width='stretch')
 
-    st.subheader("3.4 업종 TOP 10 × 시간대 소비 Heatmap")
+    st.subheader("업종 TOP 10 · 시간대별 매출 현황")
     with st.spinner("업종 × 시간대 Heatmap 생성 중..."):
         bh_fig, bh_tbl = plot_biz_hour_heatmap(df, top_n=10)
     st.pyplot(bh_fig)
@@ -662,116 +762,3 @@ with tab_hm:
                        file_name="biz_hour_sales_heatmap.png", mime="image/png")
     st.dataframe(bh_tbl.round(2), width='stretch')
 
-# =====================================================
-# 4. 매출 예측
-# =====================================================
-with tab_pred:
-    st.subheader("4. 매출 예측 화면")
-
-    p1, p2 = st.columns(2)
-
-    with p1:
-        sel_sex_label  = st.selectbox("성별(sex)",    ["남성", "여성"])
-        sel_sex        = SEX_REVERSE_MAP[sel_sex_label]
-
-        sel_age_label  = st.selectbox("연령(age)",    list(AGE_MAP.values()), index=3)
-        sel_age        = {v: k for k, v in AGE_MAP.items()}[sel_age_label]
-
-        sel_day_label  = st.selectbox("요일(day)",    list(DAY_MAP.values()), index=4)
-        sel_day        = {v: k for k, v in DAY_MAP.items()}[sel_day_label]
-
-        sel_hour_label = st.selectbox("시간대(hour)", list(HOUR_MAP.values()), index=4)
-        sel_hour       = {v: k for k, v in HOUR_MAP.items()}[sel_hour_label]
-
-        sel_month      = st.selectbox("월(month)", list(range(1, 13)), index=0,
-                                      format_func=lambda x: f"{x}월")
-
-    with p2:
-        if admin_ok:
-            sel_district = st.selectbox("시/구 선택", admin_district_list)
-            dong_opts    = admin_district_to_dongs.get(sel_district, [])
-            sel_admi_name = st.selectbox("행정동 선택", dong_opts)
-            sel_admi      = admin_name_to_code.get(sel_admi_name, 0)
-        else:
-            st.warning("⚠️ city_admin_code.csv 없음 — 코드값으로 표시")
-            fallback_opts = sorted(df["admi_cty_no"].dropna().astype(str).unique().tolist())
-            sel_admi_name = st.selectbox("행정동(admi_cty_no)", fallback_opts)
-            sel_admi      = int(sel_admi_name)
-
-        sel_biz1 = st.selectbox("업종 대분류(card_tpbuz_nm_1)",
-                                sorted(df["card_tpbuz_nm_1"].dropna().unique()))
-        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"]
-                           .dropna().unique())
-        if not biz2_opts:
-            st.warning("선택한 대분류에 해당하는 중분류가 없습니다.")
-            sel_biz2 = None
-        else:
-            sel_biz2 = st.selectbox("업종 중분류(card_tpbuz_nm_2)", biz2_opts)
-
-        avg_cnt = int(round(
-            df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
-        )) if sel_biz2 and "cnt" in df.columns else 10
-        sel_cnt = st.number_input(
-            f"거래 건수(cnt)  ※ {sel_biz2} 평균: {avg_cnt}건",
-            min_value=1, value=avg_cnt, step=1
-        )
-
-        if sel_biz2 is not None:
-            input_df = pd.DataFrame([{
-                "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
-                "month": sel_month, "admi_cty_no": sel_admi,
-                "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-                "cnt": sel_cnt,
-            }])
-
-            st.subheader("입력값 확인")
-            st.dataframe(pd.DataFrame([{
-                "성별": sel_sex_label, "연령": sel_age_label, "요일": sel_day_label,
-                "시간대": sel_hour_label, "월": f"{sel_month}월",
-                "행정동": sel_admi_name,
-                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2, "거래건수": sel_cnt,
-            }]), width='stretch')
-        else:
-            input_df = None
-
-    if st.button("예상 매출액 예측하기") and input_df is not None:
-        try:
-            model, model_info = load_saved_model()
-            encoded = transform_with_saved_encoders(input_df)
-
-            with st.expander("디버그: 인코딩된 입력값 확인"):
-                st.write("원본 입력값:", input_df.to_dict(orient="records")[0])
-                raw_pred = model.predict(encoded)[0]
-                st.write(f"모델 raw 출력 (log 공간): {raw_pred:.6f}")
-                st.write(f"use_log_target: {model_info.get('use_log_target')}")
-                st.dataframe(encoded, width='stretch')
-
-            pred = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
-            pred = max(pred, 0)
-            per_txn = pred / sel_cnt if sel_cnt > 0 else 0
-            st.success(f"예상 매출액: {pred:,.0f}원  (건당 평균 {per_txn:,.0f}원 × {sel_cnt}건)")
-        except Exception as e:
-            st.error(f"예측 오류: {e}")
-
-# =====================================================
-# 5. 보고서 문구
-# =====================================================
-with tab_report:
-    st.subheader("5. 보고서에 붙여넣을 수 있는 문구")
-    st.markdown("""
-### 인코딩 및 모델 학습
-
-○ 본 프로젝트는 성별, 연령, 요일, 시간대, 행정동, 업종 정보를 입력받아 매출금액을 예측하는 회귀 모델을 구축하였다.
-
-○ 순서에 의미가 있는 연령(`age`), 요일(`day`), 시간대(`hour`) 변수는 Label Encoding을 적용하였다.
-
-○ 순서에 의미가 없는 성별(`sex`), 행정동(`admi_cty_no`), 업종 대분류(`card_tpbuz_nm_1`), 업종 중분류(`card_tpbuz_nm_2`) 변수는 One-Hot Encoding을 적용하였다.
-
-○ 학습된 모델은 `model` 폴더에 저장하고, 학습에 사용된 인코더는 `encoders` 폴더에 저장하여 예측 시 동일한 전처리 기준을 재사용할 수 있도록 구현하였다.
-
-### 프로토타이핑
-
-○ Streamlit 기반 웹 화면을 구성하여 사용자가 성별, 연령, 요일, 시간대, 행정동, 업종을 선택하면 예상 매출금액을 확인할 수 있도록 구현하였다.
-
-○ 저장된 모델이 없는 경우 예측 버튼 클릭 시 자동으로 모델을 학습하고 저장한 뒤 예측 결과를 출력하도록 구현하였다.
-    """)
