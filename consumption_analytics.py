@@ -1136,9 +1136,19 @@ with tab_ai:
         api_key = st.text_input("OpenAI API Key", type="password",
                                 placeholder="sk-proj-...")
 
-    # 리포트 생성 옵션
-    report_district = st.selectbox("분석할 지역", admin_district_list if admin_ok else ["전체"])
-    report_biz      = st.selectbox("분석할 업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique().tolist()))
+    # ── 필터 ──
+    ai1, ai2 = st.columns(2)
+    with ai1:
+        if admin_ok:
+            ai_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="ai_dist")
+            ai_dong_opts = ["전체"] + admin_district_to_dongs.get(ai_district, []) if ai_district != "전체" else ["전체"]
+            ai_admi_name = st.selectbox("동네 선택", ai_dong_opts, key="ai_dong")
+        else:
+            ai_district = ai_admi_name = "전체"
+    with ai2:
+        ai_biz1      = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="ai_biz1")
+        ai_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == ai_biz1]["card_tpbuz_nm_2"].dropna().unique()) if ai_biz1 != "전체" else ["전체"]
+        ai_biz2      = st.selectbox("업종 중분류", ai_biz2_opts, key="ai_biz2")
 
     if st.button("📝 AI 리포트 생성", type="primary"):
         if not api_key:
@@ -1148,26 +1158,43 @@ with tab_ai:
                 try:
                     from openai import OpenAI
 
-                    # 데이터 요약 생성
+                    # ── 필터 적용 ──
                     filtered = df.copy()
-                    if report_biz != "전체":
-                        filtered = filtered[filtered["card_tpbuz_nm_1"] == report_biz]
+                    if ai_district != "전체" and ai_admi_name != "전체" and admin_ok:
+                        ai_code = admin_name_to_code.get(ai_admi_name)
+                        if ai_code:
+                            filtered = filtered[filtered["admi_cty_no"] == ai_code]
+                    elif ai_district != "전체" and admin_ok:
+                        ai_codes = set(admin_name_to_code.get(d) for d in admin_district_to_dongs.get(ai_district, []))
+                        filtered = filtered[filtered["admi_cty_no"].isin(ai_codes)]
+                    if ai_biz1 != "전체":
+                        filtered = filtered[filtered["card_tpbuz_nm_1"] == ai_biz1]
+                    if ai_biz2 != "전체":
+                        filtered = filtered[filtered["card_tpbuz_nm_2"] == ai_biz2]
 
-                    top_biz2  = filtered.groupby("card_tpbuz_nm_2")["amt"].sum().nlargest(5)
-                    top_hour  = filtered.groupby("hour")["amt"].sum().idxmax()
-                    top_day   = filtered.groupby("day")["amt"].sum().idxmax()
-                    top_age   = filtered.groupby("age")["amt"].sum().idxmax()
-                    total_amt = filtered["amt"].sum()
-                    avg_amt   = filtered["amt"].mean()
+                    if filtered.empty:
+                        st.warning("선택 조건에 해당하는 데이터가 없습니다.")
+                    else:
 
-                    hour_label = HOUR_MAP.get(top_hour, str(top_hour))
-                    day_label  = DAY_MAP.get(top_day, str(top_day))
-                    age_label  = AGE_MAP.get(top_age, str(top_age))
+                    # 데이터 요약 생성
+                        top_biz2  = filtered.groupby("card_tpbuz_nm_2")["amt"].sum().nlargest(5)
+                        top_hour  = filtered.groupby("hour")["amt"].sum().idxmax()
+                        top_day   = filtered.groupby("day")["amt"].sum().idxmax()
+                        top_age   = filtered.groupby("age")["amt"].sum().idxmax()
+                        total_amt = filtered["amt"].sum()
+                        avg_amt   = filtered["amt"].mean()
 
-                    summary = f"""
+                        hour_label = HOUR_MAP.get(top_hour, str(top_hour))
+                        day_label  = DAY_MAP.get(top_day, str(top_day))
+                        age_label  = AGE_MAP.get(top_age, str(top_age))
+
+                        loc_label = f"{ai_district} {ai_admi_name}".strip()
+                        biz_label = f"{ai_biz1} > {ai_biz2}" if ai_biz2 != "전체" else ai_biz1
+
+                        summary = f"""
 경기도 카드 소비 데이터 분석 요약:
-- 분석 지역: {report_district}
-- 분석 업종: {report_biz}
+- 분석 지역: {loc_label if loc_label != "전체 전체" else "경기도 전체"}
+- 분석 업종: {biz_label}
 - 분석 기간: {_mi.get('data_start','알 수 없음')} ~ {_mi.get('data_end','알 수 없음')}
 - 총 매출액: {total_amt:,.0f}원
 - 건당 평균 매출: {avg_amt:,.0f}원
@@ -1177,13 +1204,13 @@ with tab_ai:
 - 매출 상위 업종 중분류 TOP 5: {', '.join([f'{k}({v:,.0f}원)' for k, v in top_biz2.items()])}
 """
 
-                    client = OpenAI(api_key=api_key)
-                    response = client.chat.completions.create(
-                        model="gpt-4o",
-                        max_tokens=1024,
-                        messages=[
-                            {"role": "system", "content": "당신은 소상공인을 위한 경영 컨설턴트입니다."},
-                            {"role": "user", "content": f"""아래 경기도 카드 소비 데이터 분석 결과를 바탕으로 사장님이 바로 활용할 수 있는 인사이트 리포트를 작성해주세요.
+                        client = OpenAI(api_key=api_key)
+                        response = client.chat.completions.create(
+                            model="gpt-4o",
+                            max_tokens=1024,
+                            messages=[
+                                {"role": "system", "content": "당신은 소상공인을 위한 경영 컨설턴트입니다."},
+                                {"role": "user", "content": f"""아래 경기도 카드 소비 데이터 분석 결과를 바탕으로 사장님이 바로 활용할 수 있는 인사이트 리포트를 작성해주세요.
 
 {summary}
 
@@ -1193,22 +1220,20 @@ with tab_ai:
 3. 사장님께 드리는 제안 (2~3가지 실용적인 조언)
 
 전문 용어보다는 사장님이 바로 이해할 수 있는 쉬운 언어로 작성해주세요."""}
-                        ]
-                    )
-                    report_text = response.choices[0].message.content
-                    st.markdown(report_text)
-                    st.download_button("리포트 저장 (텍스트)", data=report_text,
-                                       file_name="ai_report.txt", mime="text/plain")
+                            ]
+                        )
+                        report_text = response.choices[0].message.content
+                        st.markdown(report_text)
+                        st.download_button("리포트 저장 (텍스트)", data=report_text,
+                                           file_name="ai_report.txt", mime="text/plain")
 
-                    # 토큰 사용량 및 비용 표시 (gpt-4o 기준)
-                    input_tokens  = response.usage.prompt_tokens
-                    output_tokens = response.usage.completion_tokens
-                    # 공식 가격: input $2.5 / 1M tokens, output $10 / 1M tokens
-                    cost_usd = (input_tokens * 2.5 + output_tokens * 10) / 1_000_000
-                    cost_krw = cost_usd * 1380
-                    st.caption(
-                        f"💸 이번 리포트 비용: **${cost_usd:.4f}** (약 {cost_krw:.1f}원) "
-                        f"| 입력 {input_tokens:,}토큰 + 출력 {output_tokens:,}토큰"
-                    )
+                        input_tokens  = response.usage.prompt_tokens
+                        output_tokens = response.usage.completion_tokens
+                        cost_usd = (input_tokens * 2.5 + output_tokens * 10) / 1_000_000
+                        cost_krw = cost_usd * 1380
+                        st.caption(
+                            f"💸 이번 리포트 비용: **${cost_usd:.4f}** (약 {cost_krw:.1f}원) "
+                            f"| 입력 {input_tokens:,}토큰 + 출력 {output_tokens:,}토큰"
+                        )
                 except Exception as e:
                     st.error(f"AI 리포트 생성 오류: {e}")
