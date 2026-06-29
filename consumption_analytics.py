@@ -952,5 +952,16 @@ with tab_ai:
                     st.markdown(report_text)
                     st.download_button("리포트 저장 (텍스트)", data=report_text,
                                        file_name="ai_report.txt", mime="text/plain")
+
+                    # 토큰 사용량 및 비용 표시 (claude-sonnet-4-6 기준)
+                    input_tokens  = message.usage.input_tokens
+                    output_tokens = message.usage.output_tokens
+                    # 공식 가격: input $3 / 1M tokens, output $15 / 1M tokens
+                    cost_usd = (input_tokens * 3 + output_tokens * 15) / 1_000_000
+                    cost_krw = cost_usd * 1380  # 환율 고정 (1달러 ≈ 1380원)
+                    st.caption(
+                        f"💸 이번 리포트 비용: **${cost_usd:.4f}** (약 {cost_krw:.1f}원) "
+                        f"| 입력 {input_tokens:,}토큰 + 출력 {output_tokens:,}토큰"
+                    )
                 except Exception as e:
                     st.error(f"AI 리포트 생성 오류: {e}")
