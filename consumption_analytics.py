@@ -87,13 +87,11 @@ ADMIN_CODE_PATHS = [
     os.path.join(DATASET_DIR, "city_admin_code.csv"),
 ]
 
-MODEL_FEATURES = ["age", "day", "hour", "month", "cnt",
-                  "sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
-CAT_COLS  = ["sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
-NUM_COLS  = ["age", "day", "hour", "month", "cnt"]
-# 하위 호환용 (로컬 학습 시 사용)
-LABEL_COLS  = ["age", "day", "hour", "month"]
-ONEHOT_COLS = ["sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]
+NUM_COLS  = ["age", "day", "hour", "month", "cnt"]   # Label Encoding (순서 의미 있음)
+CAT_COLS  = ["sex", "admi_cty_no", "card_tpbuz_nm_1", "card_tpbuz_nm_2"]  # OHE (순서 의미 없음)
+MODEL_FEATURES = NUM_COLS + CAT_COLS
+LABEL_COLS  = ["age", "day", "hour", "month"]  # cnt는 수치형 그대로
+ONEHOT_COLS = CAT_COLS
 NUMERIC_COLS = ["cnt"]
 
 AGE_MAP = {
@@ -217,9 +215,7 @@ def fit_and_save_encoders(X):
     ohe_names = ohe.get_feature_names_out(ONEHOT_COLS).tolist()
     ohe_df    = pd.DataFrame(ohe_arr, columns=ohe_names, index=X.index)
 
-    num_df          = X[NUMERIC_COLS].reset_index(drop=True) if all(c in X.columns for c in NUMERIC_COLS) else pd.DataFrame()
-    encoded_X       = pd.concat([X[LABEL_COLS].reset_index(drop=True),
-                                 num_df,
+    encoded_X       = pd.concat([X[NUM_COLS].reset_index(drop=True),
                                  ohe_df.reset_index(drop=True)], axis=1)
     feature_columns = encoded_X.columns.tolist()
 
@@ -230,48 +226,33 @@ def fit_and_save_encoders(X):
 
 
 def load_encoders():
-    label_encoders = joblib.load(LABEL_ENCODER_PATH)
+    label_encoders  = joblib.load(LABEL_ENCODER_PATH)
+    ohe             = joblib.load(ONEHOT_ENCODER_PATH) if os.path.exists(ONEHOT_ENCODER_PATH) else None
     feature_columns = joblib.load(FEATURE_COLUMNS_PATH)
-    # OHE 파일이 있으면 label_encoders에 포함 (하위 호환)
-    if os.path.exists(ONEHOT_ENCODER_PATH):
-        label_encoders["__ohe__"] = joblib.load(ONEHOT_ENCODER_PATH)
-    return label_encoders, feature_columns
+    return label_encoders, ohe, feature_columns
 
 
 def transform_with_saved_encoders(X):
     X = X.copy()
-    label_encoders, feature_columns = load_encoders()
-    model_info = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
-    encoding = model_info.get("encoding", "ohe")
+    label_encoders, ohe, feature_columns = load_encoders()
 
-    if encoding == "label":
-        # 캐글 학습 모델: 모든 카테고리 컬럼을 Label Encoding
-        for col in CAT_COLS:
-            le = label_encoders[col]
-            val = str(X[col].iloc[0])
-            if val not in le.classes_:
-                X[col] = 0  # unknown → 0
-            else:
-                X[col] = le.transform([val])[0]
-        return X[feature_columns].astype(float)
-    else:
-        # 로컬 학습 모델: Label + OHE
-        ohe = label_encoders.get("__ohe__")
-        for col in LABEL_COLS:
-            X[col] = X[col].astype(str)
-            le = label_encoders[col]
-            unknown = set(X[col].unique()) - set(le.classes_)
-            if unknown:
-                raise ValueError(f"'{col}' 컬럼에 학습되지 않은 값: {unknown}")
-            X[col] = le.transform(X[col])
-        if ohe is not None:
-            ohe_arr   = ohe.transform(X[ONEHOT_COLS].astype(str))
-            ohe_names = ohe.get_feature_names_out(ONEHOT_COLS).tolist()
-            ohe_df    = pd.DataFrame(ohe_arr, columns=ohe_names, index=X.index)
-            num_df    = X[NUMERIC_COLS].reset_index(drop=True) if all(c in X.columns for c in NUMERIC_COLS) else pd.DataFrame(index=ohe_df.index)
-            encoded_X = pd.concat([X[LABEL_COLS].reset_index(drop=True), num_df, ohe_df.reset_index(drop=True)], axis=1)
-            return encoded_X.reindex(columns=feature_columns, fill_value=0)
-        return X[feature_columns]
+    # 수치형: Label Encoding
+    for col in LABEL_COLS:
+        X[col] = X[col].astype(str)
+        le = label_encoders[col]
+        unknown = set(X[col].unique()) - set(le.classes_)
+        if unknown:
+            raise ValueError(f"'{col}' 컬럼에 학습되지 않은 값: {unknown}")
+        X[col] = le.transform(X[col])
+
+    # 범주형: One-Hot Encoding
+    ohe_arr   = ohe.transform(X[ONEHOT_COLS].astype(str))
+    ohe_names = ohe.get_feature_names_out(ONEHOT_COLS).tolist()
+    ohe_df    = pd.DataFrame(ohe_arr if not hasattr(ohe_arr, "toarray") else ohe_arr.toarray(),
+                             columns=ohe_names, index=X.index)
+    num_df    = X[NUM_COLS].reset_index(drop=True)
+    encoded_X = pd.concat([num_df, ohe_df.reset_index(drop=True)], axis=1)
+    return encoded_X.reindex(columns=feature_columns, fill_value=0)
 
 
 # =========================================================
@@ -543,11 +524,11 @@ with tab_ov:
         st.warning("⚠️ city_admin_code.csv 파일이 없어 데이터의 admi_cty_no 값을 그대로 사용합니다.")
 
     st.subheader(f"모델 입력 변수 ({len(MODEL_FEATURES)}개)")
-    enc_map = {c: "Label Encoding" for c in NUM_COLS}
-    enc_map.update({c: "Label Encoding (LightGBM 카테고리)" for c in CAT_COLS})
+    enc_map = {c: "Label Encoding (순서 의미 있음)" for c in NUM_COLS}
+    enc_map.update({c: "One-Hot Encoding (순서 의미 없음)" for c in CAT_COLS})
     st.dataframe(pd.DataFrame({
         "변수명": MODEL_FEATURES,
-        "인코딩 방식": [enc_map.get(c, "Label Encoding") for c in MODEL_FEATURES],
+        "인코딩 방식": [enc_map[c] for c in MODEL_FEATURES],
     }), width='stretch')
 
     st.subheader("행정동 코드 데이터")
