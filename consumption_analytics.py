@@ -671,7 +671,13 @@ with tab_pred:
         else:
             sel_biz2 = st.selectbox("업종 중분류(card_tpbuz_nm_2)", biz2_opts)
 
-        sel_cnt = st.number_input("거래 건수(cnt)", min_value=1, value=10, step=1)
+        avg_cnt = int(round(
+            df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
+        )) if sel_biz2 and "cnt" in df.columns else 10
+        sel_cnt = st.number_input(
+            f"거래 건수(cnt)  ※ {sel_biz2} 평균: {avg_cnt}건",
+            min_value=1, value=avg_cnt, step=1
+        )
 
         if sel_biz2 is not None:
             input_df = pd.DataFrame([{
