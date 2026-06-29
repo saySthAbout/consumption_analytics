@@ -158,13 +158,21 @@ SEX_REVERSE_MAP = {"남성": "M", "여성": "F"}
 # =========================================================
 # 1. 데이터 로드 함수
 # =========================================================
+_SALES_DTYPES = {
+    "cty_rgn_no": "int32", "admi_cty_no": "int32",
+    "hour": "int8", "sex": "category", "age": "int8",
+    "day": "int8", "amt": "int32", "cnt": "int16",
+    "card_tpbuz_cd": "category",
+    "card_tpbuz_nm_1": "category", "card_tpbuz_nm_2": "category",
+}
+
 def read_csv_auto(path_list):
     encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
     for path in path_list:
         if os.path.exists(path):
             for enc in encodings:
                 try:
-                    df = pd.read_csv(path, encoding=enc)
+                    df = pd.read_csv(path, encoding=enc, dtype=_SALES_DTYPES)
                     return df, enc, path
                 except Exception:
                     continue
@@ -256,8 +264,8 @@ def preprocess_data(df):
     df["day_label"]  = df["day"].map(DAY_MAP)
     df["hour_label"] = df["hour"].map(HOUR_MAP)
     df["sex_label"]  = df["sex"].map(SEX_MAP)
-    df["log_amt"]    = np.log1p(df["amt"])
-    df["log_cnt"]    = np.log1p(df["cnt"])
+    df["log_amt"]    = np.log1p(df["amt"].astype("float32")).astype("float32")
+    df["log_cnt"]    = np.log1p(df["cnt"].astype("float32")).astype("float32")
     return df
 
 
