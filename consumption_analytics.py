@@ -168,14 +168,41 @@ def load_admin_code_data(mtime):
     raise ValueError(f"city_admin_code.csv 읽기 실패: {last_err}")
 
 
+DISTRICT_MAP = {
+    "41111": "수원시 장안구", "41113": "수원시 권선구",
+    "41115": "수원시 팔달구", "41117": "수원시 영통구",
+    "41131": "성남시 수정구", "41133": "성남시 중원구", "41135": "성남시 분당구",
+    "41150": "안양시 만안구",  # 41150 → 만안구 (41171도 안양시)
+    "41171": "안양시 만안구", "41173": "안양시 동안구",
+    "41210": "부천시",
+    "41271": "광명시",
+    "41273": "안산시 단원구",
+    "41360": "남양주시",
+    "41390": "시흥시",
+    "41450": "하남시",
+    "41461": "용인시 처인구", "41463": "용인시 기흥구", "41465": "용인시 수지구",
+    "41480": "과천시",
+    "41570": "의정부시",
+    "41591": "화성시", "41593": "화성시(동탄1)", "41595": "화성시(동탄2)", "41597": "화성시(동탄3)",
+    "41650": "파주시",
+    "41670": "김포시",
+    "41800": "여주시",
+}
+
 def build_admin_maps(admin_df):
     admin_df = admin_df.copy()
     admin_df["admi_cty_no"]   = admin_df["admi_cty_no"].astype(int)
     admin_df["admi_cty_name"] = admin_df["admi_cty_name"].astype(str).str.strip()
-    name_options = admin_df["admi_cty_name"].tolist()
+    admin_df["district"]      = admin_df["admi_cty_no"].astype(str).str[:5].map(DISTRICT_MAP).fillna("기타")
     name_to_code = dict(zip(admin_df["admi_cty_name"], admin_df["admi_cty_no"]))
     code_to_name = dict(zip(admin_df["admi_cty_no"],   admin_df["admi_cty_name"]))
-    return name_options, name_to_code, code_to_name
+    # district → dong 목록
+    district_to_dongs = (
+        admin_df.groupby("district")["admi_cty_name"]
+        .apply(sorted).to_dict()
+    )
+    district_list = sorted(district_to_dongs.keys())
+    return district_list, district_to_dongs, name_to_code, code_to_name
 
 
 def preprocess_data(df):
@@ -498,15 +525,16 @@ try:
     admin_real_path    = find_admin_path()
     admin_mtime        = os.path.getmtime(admin_real_path)
     admin_df, admin_enc, admin_path = load_admin_code_data(admin_mtime)
-    admin_name_options, admin_name_to_code, _ = build_admin_maps(admin_df)
+    admin_district_list, admin_district_to_dongs, admin_name_to_code, _ = build_admin_maps(admin_df)
     admin_ok = True
 except Exception:
-    admin_ok           = False
-    admin_df           = pd.DataFrame(columns=["admi_cty_no", "admi_cty_name"])
-    admin_name_options = sorted(df["admi_cty_no"].dropna().astype(str).unique().tolist())
-    admin_name_to_code = {v: v for v in admin_name_options}
-    admin_enc          = "-"
-    admin_path         = "-"
+    admin_ok                = False
+    admin_df                = pd.DataFrame(columns=["admi_cty_no", "admi_cty_name"])
+    admin_district_list     = []
+    admin_district_to_dongs = {}
+    admin_name_to_code      = {v: v for v in sorted(df["admi_cty_no"].dropna().astype(str).unique())}
+    admin_enc               = "-"
+    admin_path              = "-"
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
 tab_ov, tab_eda, tab_hm, tab_pred, tab_report = st.tabs([
@@ -644,14 +672,16 @@ with tab_pred:
                                       format_func=lambda x: f"{x}월")
 
     with p2:
-        st.caption(f"행정동 선택 가능 개수: {len(admin_name_options)}개"
-                   + ("" if admin_ok else "  ⚠️ city_admin_code.csv 없음 — 코드값으로 표시"))
-        sel_admi_name = st.selectbox("행정동(admi_cty_no)", options=admin_name_options)
-        sel_admi      = admin_name_to_code[sel_admi_name]
-
         if admin_ok:
-            with st.expander("행정동 전체 목록 확인"):
-                st.dataframe(admin_df, width='stretch')
+            sel_district = st.selectbox("시/구 선택", admin_district_list)
+            dong_opts    = admin_district_to_dongs.get(sel_district, [])
+            sel_admi_name = st.selectbox("행정동 선택", dong_opts)
+            sel_admi      = admin_name_to_code.get(sel_admi_name, 0)
+        else:
+            st.warning("⚠️ city_admin_code.csv 없음 — 코드값으로 표시")
+            fallback_opts = sorted(df["admi_cty_no"].dropna().astype(str).unique().tolist())
+            sel_admi_name = st.selectbox("행정동(admi_cty_no)", fallback_opts)
+            sel_admi      = int(sel_admi_name)
 
         sel_biz1 = st.selectbox("업종 대분류(card_tpbuz_nm_1)",
                                 sorted(df["card_tpbuz_nm_1"].dropna().unique()))
