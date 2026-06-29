@@ -30,6 +30,42 @@ st.set_page_config(
 
 import matplotlib.font_manager as fm
 
+# pkl 역직렬화를 위해 학습 때와 동일한 클래스를 모듈 최상단에 정의
+try:
+    import torch
+    import torch.nn as nn
+
+    class LSTMModel(nn.Module):
+        def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=1):
+            super().__init__()
+            self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+            self.fc   = nn.Linear(hidden_size, output_size)
+        def forward(self, x):
+            out, _ = self.lstm(x)
+            return self.fc(out[:, -1, :])
+
+    class Autoencoder(nn.Module):
+        def __init__(self, input_dim, latent_dim):
+            super().__init__()
+            self.encoder = nn.Sequential(
+                nn.Linear(input_dim, 32), nn.ReLU(),
+                nn.Linear(32, 16),        nn.ReLU(),
+                nn.Linear(16, latent_dim)
+            )
+            self.decoder = nn.Sequential(
+                nn.Linear(latent_dim, 16), nn.ReLU(),
+                nn.Linear(16, 32),         nn.ReLU(),
+                nn.Linear(32, input_dim),  nn.Sigmoid()
+            )
+        def forward(self, x):
+            return self.decoder(self.encoder(x))
+        def encode(self, x):
+            return self.encoder(x)
+
+    _torch_available = True
+except ImportError:
+    _torch_available = False
+
 def _setup_korean_font():
     candidates = [
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -838,40 +874,6 @@ with tab_lstm:
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
 # =====================================================
-
-# pkl 역직렬화를 위해 학습 때와 동일한 클래스 구조 필요
-try:
-    import torch
-    import torch.nn as nn
-
-    class Autoencoder(nn.Module):
-        def __init__(self, input_dim, latent_dim):
-            super().__init__()
-            self.encoder = nn.Sequential(
-                nn.Linear(input_dim, 32), nn.ReLU(),
-                nn.Linear(32, 16),        nn.ReLU(),
-                nn.Linear(16, latent_dim)
-            )
-            self.decoder = nn.Sequential(
-                nn.Linear(latent_dim, 16), nn.ReLU(),
-                nn.Linear(16, 32),         nn.ReLU(),
-                nn.Linear(32, input_dim),  nn.Sigmoid()
-            )
-        def forward(self, x):
-            return self.decoder(self.encoder(x))
-        def encode(self, x):
-            return self.encoder(x)
-
-    class LSTMModel(nn.Module):
-        def __init__(self, input_size=1, hidden_size=64, num_layers=2, output_size=1):
-            super().__init__()
-            self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
-            self.fc   = nn.Linear(hidden_size, output_size)
-        def forward(self, x):
-            out, _ = self.lstm(x)
-            return self.fc(out[:, -1, :])
-except ImportError:
-    pass
 
 with tab_cluster:
     st.subheader("우리 동네 고객은 어떤 유형일까요?")
