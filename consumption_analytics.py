@@ -405,6 +405,25 @@ def load_lstm_model():
 def load_cluster_model():
     return joblib.load(CLUSTER_MODEL_PATH)
 
+@st.cache_data
+def load_store_counts():
+    path = os.path.join(DATASET_DIR, "semas_store_count.csv")
+    if not os.path.exists(path):
+        return None
+    df = pd.read_csv(path, encoding="utf-8-sig", dtype={"행정동코드": str})
+    return df
+
+# 카드 대분류 → SEMAS 대분류 매핑
+CARD_TO_SEMAS_BIZ = {
+    "음식":        "음식",
+    "소매/유통":   "소매",
+    "의료/건강":   "보건의료",
+    "학문/교육":   "교육",
+    "생활서비스":  "수리·개인",
+    "여가/오락":   "예술·스포츠",
+    "공연/전시":   "예술·스포츠",
+}
+
 
 def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use_log_target):
     """인코딩된 데이터로 모델 하나만 학습 — 파일 저장 없이 metrics 반환."""
@@ -1032,9 +1051,30 @@ with tab_lstm:
             if v >= 1e4:   return f"{v/1e4:,.0f}만원"
             return f"{v:,.0f}원"
 
-        d1, d2 = st.columns(2)
+        d1, d2, d3 = st.columns(3)
         d1.metric("기간 평균 일매출", fmt(avg_amt))
         d2.metric("기간 총 매출",     fmt(tot_amt))
+
+        # ── 업체당 매출 ──
+        store_cnt_df = load_store_counts()
+        if store_cnt_df is not None and lt_biz1 != "전체":
+            semas_biz = CARD_TO_SEMAS_BIZ.get(lt_biz1)
+            if semas_biz:
+                sc = store_cnt_df[store_cnt_df["상권업종대분류명"] == semas_biz]
+                if lt_admi_name != "전체" and admin_ok:
+                    admi_code = str(admin_name_to_code.get(lt_admi_name, ""))
+                    sc = sc[sc["행정동코드"] == admi_code]
+                elif lt_district != "전체" and admin_ok:
+                    lt_codes_str = {str(admin_name_to_code.get(d, "")) for d in admin_district_to_dongs.get(lt_district, [])}
+                    sc = sc[sc["행정동코드"].isin(lt_codes_str)]
+                n_stores = int(sc["store_count"].sum())
+                if n_stores > 0:
+                    per_store_avg = avg_amt / n_stores
+                    d3.metric(
+                        f"업체당 평균 일매출",
+                        fmt(per_store_avg),
+                        help=f"해당 조건 업체 수: {n_stores:,}개 (소상공인 상가정보 2026.03 기준)"
+                    )
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
