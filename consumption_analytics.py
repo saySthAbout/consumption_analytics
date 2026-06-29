@@ -551,13 +551,13 @@ tab_ov, tab_eda, tab_hm, tab_pred, tab_report = st.tabs([
 # =====================================================
 with tab_ov:
     st.subheader("1. 데이터 수집 및 임포팅")
-    all_sales_files = sorted(glob.glob(os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_*.csv")))
-    n_files = len(all_sales_files)
+    _mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
+    n_files = _mi.get("n_files", len(glob.glob(os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_*.csv"))))
+    first_name = os.path.basename(sales_path)
     if n_files > 1:
-        first_name = os.path.basename(all_sales_files[0])
         st.write(f"매출 데이터 파일: `{first_name}` 등 {n_files}개  /  인코딩: `{sales_enc}`")
     else:
-        st.write(f"매출 데이터 파일: `{sales_path}`  /  인코딩: `{sales_enc}`")
+        st.write(f"매출 데이터 파일: `{first_name}`  /  인코딩: `{sales_enc}`")
     st.write(f"행정동 코드 파일: `{admin_path}`  /  인코딩: `{admin_enc}`")
 
     c1, c2, c3, c4 = st.columns(4)
