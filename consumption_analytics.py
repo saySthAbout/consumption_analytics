@@ -552,29 +552,19 @@ tab_pred, tab_hm, tab_eda, tab_lstm, tab_cluster, tab_ai, tab_ov = st.tabs([
 _mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
 
 # =====================================================
-# 4. 매출 예측 (탭 1 - 사장님 첫 화면)
+# 💰 매출 예측 (탭 1 - 사장님 하루 단위 예측)
 # =====================================================
 with tab_pred:
-    st.subheader("우리 가게 예상 매출은 얼마일까요?")
-    st.caption("성별, 연령, 요일, 시간대, 동네, 업종을 선택하면 예상 매출액을 알려드립니다.")
+    st.subheader("오늘 하루 예상 매출은 얼마일까요?")
+    st.caption("월·요일·동네·업종을 선택하면 하루 예상 매출을 알려드립니다.")
 
     p1, p2 = st.columns(2)
 
     with p1:
-        sel_sex_label  = st.selectbox("고객 성별",   ["남성", "여성"])
-        sel_sex        = SEX_REVERSE_MAP[sel_sex_label]
-
-        sel_age_label  = st.selectbox("고객 연령대", list(AGE_MAP.values()), index=3)
-        sel_age        = {v: k for k, v in AGE_MAP.items()}[sel_age_label]
-
-        sel_day_label  = st.selectbox("요일",        list(DAY_MAP.values()), index=4)
-        sel_day        = {v: k for k, v in DAY_MAP.items()}[sel_day_label]
-
-        sel_hour_label = st.selectbox("시간대",      list(HOUR_MAP.values()), index=4)
-        sel_hour       = {v: k for k, v in HOUR_MAP.items()}[sel_hour_label]
-
-        sel_month      = st.selectbox("월", list(range(1, 13)), index=0,
-                                      format_func=lambda x: f"{x}월")
+        sel_month = st.selectbox("월", list(range(1, 13)), index=0,
+                                 format_func=lambda x: f"{x}월")
+        sel_day_label = st.selectbox("요일", list(DAY_MAP.values()), index=4)
+        sel_day = {v: k for k, v in DAY_MAP.items()}[sel_day_label]
 
     with p2:
         if admin_ok:
@@ -588,10 +578,8 @@ with tab_pred:
             sel_admi_name = st.selectbox("동네", fallback_opts)
             sel_admi      = int(sel_admi_name)
 
-        sel_biz1 = st.selectbox("업종 대분류",
-                                sorted(df["card_tpbuz_nm_1"].dropna().unique()))
-        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"]
-                           .dropna().unique())
+        sel_biz1  = st.selectbox("업종 대분류", sorted(df["card_tpbuz_nm_1"].dropna().unique()))
+        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"].dropna().unique())
         if not biz2_opts:
             st.warning("선택한 대분류에 해당하는 중분류가 없습니다.")
             sel_biz2 = None
@@ -602,54 +590,82 @@ with tab_pred:
             df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
         )) if sel_biz2 and "cnt" in df.columns else 10
         sel_cnt = st.number_input(
-            f"예상 거래 건수  ※ {sel_biz2} 평균: {avg_cnt}건",
+            f"하루 예상 거래 건수  ※ {sel_biz2} 평균: {avg_cnt}건",
             min_value=1, value=avg_cnt, step=1
         )
 
-        if sel_biz2 is not None:
-            input_df = pd.DataFrame([{
-                "sex": sel_sex, "age": sel_age, "day": sel_day, "hour": sel_hour,
-                "month": sel_month, "admi_cty_no": sel_admi,
-                "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-                "cnt": sel_cnt,
-            }])
-
-            st.subheader("입력 조건 확인")
-            st.dataframe(pd.DataFrame([{
-                "성별": sel_sex_label, "연령대": sel_age_label, "요일": sel_day_label,
-                "시간대": sel_hour_label, "월": f"{sel_month}월",
-                "동네": sel_admi_name,
-                "업종 대분류": sel_biz1, "업종 중분류": sel_biz2, "거래건수": sel_cnt,
-            }]), width='stretch')
-        else:
-            input_df = None
-
-    if st.button("예상 매출액 예측하기", type="primary") and input_df is not None:
+    if sel_biz2 is not None and st.button("하루 예상 매출 계산하기", type="primary"):
         try:
             model, model_info = load_saved_model()
-            encoded = transform_with_saved_encoders(input_df)
 
-            with st.expander("🔍 상세 디버그 정보"):
-                st.write("원본 입력값:", input_df.to_dict(orient="records")[0])
-                raw_pred = model.predict(encoded)[0]
-                st.write(f"모델 raw 출력 (log 공간): {raw_pred:.6f}")
-                st.write(f"use_log_target: {model_info.get('use_log_target')}")
-                st.dataframe(encoded, width='stretch')
+            # 선택 조건에 맞는 데이터로 성별·연령·시간대 대표값 자동 계산
+            mask = (
+                (df["card_tpbuz_nm_2"] == sel_biz2) &
+                (df["day"] == sel_day) &
+                (df["month"] == sel_month)
+            )
+            ref = df[mask] if mask.sum() >= 10 else df[df["card_tpbuz_nm_2"] == sel_biz2]
 
-            pred    = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
-            pred    = max(pred, 0)
-            per_txn = pred / sel_cnt if sel_cnt > 0 else 0
+            # 모든 시간대·성별·연령 조합으로 예측해서 합산 (하루 전체 매출)
+            hours = sorted(df["hour"].dropna().unique())
+            sexes = sorted(df["sex"].dropna().unique())
+            ages  = sorted(df["age"].dropna().unique())
 
-            # 동네·업종 평균 매출과 비교
-            mask = (df["card_tpbuz_nm_2"] == sel_biz2) if sel_biz2 else pd.Series([False]*len(df))
-            area_avg = df.loc[mask, "amt"].mean() if mask.any() else None
+            # 조합이 너무 많으면 대표값만 사용
+            use_full = len(hours) * len(sexes) * len(ages) <= 200
+            if use_full:
+                combos = [(h, s, a) for h in hours for s in sexes for a in ages]
+            else:
+                top_hour = int(ref["hour"].mode()[0]) if not ref.empty else 5
+                top_sex  = str(ref["sex"].mode()[0])  if not ref.empty else "M"
+                top_age  = int(ref["age"].mode()[0])  if not ref.empty else 4
+                combos   = [(top_hour, top_sex, top_age)]
 
-            st.success(f"예상 매출액: **{pred:,.0f}원**  (건당 평균 {per_txn:,.0f}원 × {sel_cnt}건)")
-            if area_avg:
-                diff_pct = (pred - area_avg) / area_avg * 100
+            total_pred = 0.0
+            for h, s, a in combos:
+                row = pd.DataFrame([{
+                    "sex": s, "age": a, "day": sel_day, "hour": h,
+                    "month": sel_month, "admi_cty_no": sel_admi,
+                    "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
+                    "cnt": sel_cnt,
+                }])
+                try:
+                    encoded  = transform_with_saved_encoders(row)
+                    raw_pred = model.predict(encoded)[0]
+                    p        = np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred
+                    total_pred += max(p, 0)
+                except Exception:
+                    pass
+
+            # 조합 평균 → 하루 매출 (시간대수 × 거래건수 기반 스케일)
+            if use_full:
+                # 전체 조합 합산이면 시간대별 비중으로 나눠서 일 매출 추정
+                daily_pred = total_pred / (len(sexes) * len(ages))
+            else:
+                # 대표값 1개 예측 → 시간대 수 만큼 스케일
+                daily_pred = total_pred * len(hours)
+
+            per_txn  = daily_pred / (sel_cnt * len(hours)) if sel_cnt > 0 else 0
+
+            # 실제 데이터 기준 비교
+            area_mask = df["card_tpbuz_nm_2"] == sel_biz2
+            area_daily_avg = df.loc[area_mask, "amt"].sum() / max(df.loc[area_mask, "day"].nunique(), 1) if area_mask.any() else None
+
+            # 결과 표시
+            st.success(f"### 하루 예상 매출: **{daily_pred:,.0f}원**")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("건당 평균 매출",  f"{per_txn:,.0f}원")
+            c2.metric("예상 거래 건수",  f"{sel_cnt}건/시간대")
+            c3.metric("분석 업종",       sel_biz2)
+
+            if area_daily_avg:
+                diff_pct = (daily_pred - area_daily_avg) / area_daily_avg * 100
                 arrow = "▲" if diff_pct >= 0 else "▼"
                 color = "🟢" if diff_pct >= 0 else "🔴"
-                st.info(f"{color} 해당 업종 전체 평균({area_avg:,.0f}원)보다 {arrow} {abs(diff_pct):.1f}% {'높습니다' if diff_pct >= 0 else '낮습니다'}")
+                st.info(f"{color} 해당 업종 평균 하루 매출({area_daily_avg:,.0f}원)보다 {arrow} {abs(diff_pct):.1f}% {'높은 수준입니다' if diff_pct >= 0 else '낮은 수준입니다'}")
+
+            st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
+
         except Exception as e:
             st.error(f"예측 오류: {e}")
 
