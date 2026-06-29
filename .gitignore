@@ -11,6 +11,9 @@ __pycache__/
 *.pyo
 .ipynb_checkpoints/
 
+# Streamlit secrets (API 키 등 민감 정보)
+.streamlit/secrets.toml
+
 # 기타
 *.egg-info/
 dist/
