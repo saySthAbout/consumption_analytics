@@ -926,8 +926,8 @@ with tab_lstm:
                 for _ in range(FORECAST_DAYS):
                     out = model_lstm(seq)
                     preds.append(out.item())
-                    next_val = out.unsqueeze(0)
-                    seq = torch.cat([seq[:,1:,:], next_val.unsqueeze(2)], dim=1)
+                    next_val = out.unsqueeze(1)  # [1,1] → [1,1,1]
+                    seq = torch.cat([seq[:,1:,:], next_val], dim=1)
             pred_vals = scaler_lstm.inverse_transform(
                 [[p] for p in preds])[:,0]
 
