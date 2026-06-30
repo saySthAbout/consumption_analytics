@@ -509,13 +509,31 @@ def load_sales_data(yyyymm: str):
 
 # 한글 시/구명 → CSV 파일명 영문 접미어 매핑
 CITY_KO_TO_EN: dict[str, str] = {
-    "안산시": "ansan",    "안양시": "anyang",     "김포시": "gimpo",
-    "광명시": "gwangmyeong", "하남시": "hanam",   "화성시": "hwaseong",
-    "남양주시": "namyangju", "파주시": "paju",    "포천시": "pocheon",
-    "성남시": "seongnam", "시흥시": "siheung",   "수원시": "suwon",
-    "의정부시": "uijeongbu", "의왕시": "uiwang", "여주시": "weju",
-    "용인시": "yongin",   "원천시": "woncheon",
+    "안산시":   "ansan",       "안양시":  "anyang",     "김포시":  "gimpo",
+    "광명시":   "gwangmyeong", "하남시":  "hanam",      "화성시":  "hwaseong",
+    "남양주시": "namyangju",   "파주시":  "paju",       "포천시":  "pocheon",
+    "성남시":   "seongnam",    "시흥시":  "siheung",    "수원시":  "suwon",
+    "의정부시": "uijeongbu",   "여주시":  "yeoju",      "용인시":  "yongin",
+    "과천시":   "gwacheon",    "이천시":  "icheon",     "연천군":  "yeoncheon",
 }
+
+# 도시별 가용 월 (HuggingFace Dataset 기준)
+_AVAIL_DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "available_data.json")
+def _load_available_data() -> dict[str, list[str]]:
+    try:
+        import json
+        with open(_AVAIL_DATA_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+CITY_AVAILABLE_MONTHS: dict[str, list[str]] = _load_available_data()  # city_en -> [yyyymm]
+
+def get_available_months_for_city(city_korean: str) -> list[int]:
+    """도시 한글명 → 가용 월(int) 리스트. 없으면 AVAILABLE_YYYYMM 전체 반환."""
+    city_en = CITY_KO_TO_EN.get(city_korean)
+    if not city_en or city_en not in CITY_AVAILABLE_MONTHS:
+        return sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+    return sorted({int(m[4:]) for m in CITY_AVAILABLE_MONTHS[city_en]})
 
 
 _FILEID_MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "card_csvs", "_fileid_map.json")
@@ -575,7 +593,7 @@ def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
             resp = requests.get(url, stream=True, timeout=120,
                                 headers={"User-Agent": "Mozilla/5.0"})
             if resp.status_code == 404:
-                st.error(f"{target_name} 파일을 찾을 수 없습니다.")
+                st.warning(f"⚠️ {city_korean} {yyyymm[4:]}월 카드 데이터가 제공되지 않습니다. 다른 지역 또는 월을 선택해주세요.")
                 return False
             resp.raise_for_status()
             size = 0
@@ -1291,7 +1309,7 @@ with tab_pred:
             sel_district = sel_admi_name = "전체"
             sel_admi = 0
 
-        _avail_months = sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+        _avail_months = get_available_months_for_city(sel_district) if sel_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
         _def_month_val = int(loaded_yyyymm[-2:])
         _def_month_idx = (_avail_months.index(_def_month_val) + 1) if _def_month_val in _avail_months else 0
         sel_month     = st.selectbox("월", ["전체"] + _avail_months,
@@ -1471,7 +1489,8 @@ with tab_hm:
             hm_admi_name = st.selectbox("동네 선택", hm_dong_opts, key="hm_dong")
         else:
             hm_district = hm_admi_name = "전체"
-        _hm_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
+        _hm_avail = get_available_months_for_city(hm_district) if hm_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+        _hm_month_opts = ["전체"] + [f"{m}월" for m in _hm_avail]
         hm_month = st.selectbox("월", _hm_month_opts, key="hm_month", index=0)
     with hm2:
         hm_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="hm_biz1")
@@ -1767,7 +1786,8 @@ with tab_cluster:
             cl_admi_name = st.selectbox("동네 선택", cl_dong_opts, key="cl_dong")
         else:
             cl_district = cl_admi_name = "전체"
-        _cl_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
+        _cl_avail = get_available_months_for_city(cl_district) if cl_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+        _cl_month_opts = ["전체"] + [f"{m}월" for m in _cl_avail]
         cl_month = st.selectbox("월", _cl_month_opts, key="cl_month", index=0)
         all_days  = list(DAY_MAP.values())
         cl_days   = st.multiselect("요일 (전체 선택 = 모든 요일)", all_days, default=all_days, key="cl_days")
