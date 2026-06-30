@@ -273,60 +273,75 @@ DISTRICT_MAP = {
     "41800": "여주시",
 }
 
+AGE_COLS_M = [f"M_{a}_CNT" for a in [10,15,20,25,30,35,40,45,50,55,60,65,70]]
+AGE_COLS_F = [f"F_{a}_CNT" for a in [10,15,20,25,30,35,40,45,50,55,60,65,70]]
+
+def _age_label(col: str) -> str:
+    n = int(col.split("_")[1])
+    if n < 15:  return "10대 미만"
+    if n < 20:  return "10대"
+    if n < 30:  return "20대"
+    if n < 40:  return "30대"
+    if n < 50:  return "40대"
+    if n < 60:  return "50대"
+    if n < 70:  return "60대"
+    return "70대 이상"
+
 @st.cache_data
-def load_flowpop_data(zip_path: str):
-    """유동인구 zip 파일에서 전체 CSV를 읽어 하나의 DataFrame으로 반환."""
+def load_flowpop_data(zip_path: str) -> dict:
+    """파일별로 읽으면서 즉시 집계 → 작은 집계 DataFrame 딕셔너리 반환."""
     import zipfile, io
-    frames = []
+
+    hm_frames, age_frames, daily_frames = [], [], []
+
     with zipfile.ZipFile(zip_path) as z:
         for name in z.namelist():
             if not name.endswith(".csv"):
                 continue
-            with z.open(name) as f:
-                try:
+            try:
+                with z.open(name) as f:
                     chunk = pd.read_csv(io.BytesIO(f.read()), encoding="utf-8")
-                    frames.append(chunk)
-                except Exception:
-                    pass
-    if not frames:
-        return pd.DataFrame()
-    fp = pd.concat(frames, ignore_index=True)
-    fp["ETL_YMD"] = pd.to_datetime(fp["ETL_YMD"].astype(str), format="%Y%m%d", errors="coerce")
-    # 성별×연령대 컬럼을 long 형식으로도 미리 준비
-    age_cols_m = [c for c in fp.columns if c.startswith("M_") and c.endswith("_CNT")]
-    age_cols_f = [c for c in fp.columns if c.startswith("F_") and c.endswith("_CNT")]
-    # 합계 컬럼
-    fp["TOTAL_CNT"] = fp[age_cols_m + age_cols_f].sum(axis=1)
-    fp["MALE_CNT"]  = fp[age_cols_m].sum(axis=1)
-    fp["FEMALE_CNT"] = fp[age_cols_f].sum(axis=1)
-    return fp
 
+                chunk["ETL_YMD"] = pd.to_datetime(
+                    chunk["ETL_YMD"].astype(str), format="%Y%m%d", errors="coerce")
+                chunk["DOW"] = chunk["ETL_YMD"].dt.dayofweek
 
-def _flowpop_long(fp: pd.DataFrame) -> pd.DataFrame:
-    """유동인구를 성별×연령대 long 형식으로 변환."""
-    age_map = {
-        "10": "10대 미만", "15": "10대", "20": "20대", "25": "20대후반",
-        "30": "30대", "35": "30대후반", "40": "40대", "45": "40대후반",
-        "50": "50대", "55": "50대후반", "60": "60대", "65": "60대후반", "70": "70대 이상"
-    }
-    records = []
-    for _, row in fp.iterrows():
-        for prefix, sex_label in [("M", "남성"), ("F", "여성")]:
-            for key, age_label in age_map.items():
-                col = f"{prefix}_{key}_CNT"
-                if col in fp.columns:
-                    records.append({
-                        "ADMI_CD": row["ADMI_CD"],
-                        "CTY_NM": row.get("CTY_NM"),
-                        "ADMI_NM": row.get("ADMI_NM"),
-                        "ETL_YMD": row["ETL_YMD"],
-                        "TIME_CD": row["TIME_CD"],
-                        "FORN_GB": row["FORN_GB"],
-                        "SEX": sex_label,
-                        "AGE_GRP": age_label,
-                        "CNT": row[col],
-                    })
-    return pd.DataFrame(records)
+                am = [c for c in AGE_COLS_M if c in chunk.columns]
+                af = [c for c in AGE_COLS_F if c in chunk.columns]
+                chunk["TOTAL_CNT"]  = chunk[am + af].sum(axis=1)
+                chunk["MALE_CNT"]   = chunk[am].sum(axis=1)
+                chunk["FEMALE_CNT"] = chunk[af].sum(axis=1)
+
+                key_cols = ["CTY_NM", "ADMI_NM", "ADMI_CD", "FORN_GB"]
+
+                # ① 히트맵용: 시간대×요일×지역 집계
+                hm = chunk.groupby(key_cols + ["TIME_CD", "DOW"])["TOTAL_CNT"].sum().reset_index()
+                hm_frames.append(hm)
+
+                # ② 연령대·성별용: 지역×성별 집계 (연령대 컬럼 유지)
+                ag_cols = key_cols + am + af + ["TOTAL_CNT", "MALE_CNT", "FEMALE_CNT"]
+                ag = chunk[ag_cols].groupby(key_cols).sum().reset_index()
+                age_frames.append(ag)
+
+                # ③ 매출 상관용: 일별×행정동 집계
+                dl = chunk.groupby(["ETL_YMD", "ADMI_CD"])["TOTAL_CNT"].sum().reset_index()
+                daily_frames.append(dl)
+
+            except Exception:
+                pass
+
+    if not hm_frames:
+        return {}
+
+    grp = ["CTY_NM", "ADMI_NM", "ADMI_CD", "FORN_GB"]
+    heatmap_df = (pd.concat(hm_frames, ignore_index=True)
+                    .groupby(grp + ["TIME_CD", "DOW"])["TOTAL_CNT"].sum().reset_index())
+    age_df     = (pd.concat(age_frames, ignore_index=True)
+                    .groupby(grp).sum().reset_index())
+    daily_df   = (pd.concat(daily_frames, ignore_index=True)
+                    .groupby(["ETL_YMD", "ADMI_CD"])["TOTAL_CNT"].sum().reset_index())
+
+    return {"heatmap": heatmap_df, "age": age_df, "daily": daily_df}
 
 
 @st.cache_data
@@ -1545,64 +1560,62 @@ with tab_fp:
             )
 
     if os.path.exists(FLOWPOP_ZIP_PATH):
-        if "fp_all" not in st.session_state:
-            with st.spinner("유동인구 데이터 로딩 중..."):
-                st.session_state["fp_all"] = load_flowpop_data(FLOWPOP_ZIP_PATH)
-        fp_all = st.session_state["fp_all"]
+        if "fp_data" not in st.session_state:
+            with st.spinner("유동인구 데이터 집계 중... (최초 1회)"):
+                st.session_state["fp_data"] = load_flowpop_data(FLOWPOP_ZIP_PATH)
+        fp_data = st.session_state["fp_data"]
 
-        if fp_all.empty:
+        if not fp_data:
             st.error("유동인구 데이터를 불러오지 못했습니다.")
         else:
-            # ── 공통 필터 ──────────────────────────────────────
-            fp_areas = sorted(fp_all["CTY_NM"].dropna().unique())
-            fp_dongs = sorted(fp_all["ADMI_NM"].dropna().unique())
+            fp_hm    = fp_data["heatmap"]   # CTY_NM, ADMI_NM, ADMI_CD, FORN_GB, TIME_CD, DOW, TOTAL_CNT
+            fp_age   = fp_data["age"]        # CTY_NM, ADMI_NM, ADMI_CD, FORN_GB, M_*/F_*, TOTAL_CNT, ...
+            fp_daily = fp_data["daily"]      # ETL_YMD, ADMI_CD, TOTAL_CNT
 
+            # ── 공통 필터 ──────────────────────────────────────
+            fp_areas = sorted(fp_hm["CTY_NM"].dropna().unique())
             fc1, fc2 = st.columns(2)
             with fc1:
                 fp_sel_city = st.selectbox("시/구 선택", ["전체"] + fp_areas, key="fp_city")
             with fc2:
                 if fp_sel_city != "전체":
-                    dong_pool = sorted(fp_all[fp_all["CTY_NM"] == fp_sel_city]["ADMI_NM"].dropna().unique())
+                    dong_pool = sorted(fp_hm[fp_hm["CTY_NM"] == fp_sel_city]["ADMI_NM"].dropna().unique())
                 else:
-                    dong_pool = fp_dongs
+                    dong_pool = sorted(fp_hm["ADMI_NM"].dropna().unique())
                 fp_sel_dong = st.selectbox("행정동 선택", ["전체"] + dong_pool, key="fp_dong")
 
-            fp_forn = st.radio(
-                "내/외국인 구분", ["전체", "내국인만", "외국인만"],
-                horizontal=True, key="fp_forn"
-            )
+            fp_forn = st.radio("내/외국인 구분", ["전체", "내국인만", "외국인만"],
+                               horizontal=True, key="fp_forn")
 
-            # 필터 적용
-            fp = fp_all.copy()
-            if fp_sel_city != "전체":
-                fp = fp[fp["CTY_NM"] == fp_sel_city]
-            if fp_sel_dong != "전체":
-                fp = fp[fp["ADMI_NM"] == fp_sel_dong]
-            if fp_forn == "내국인만":
-                fp = fp[fp["FORN_GB"] == "N"]
-            elif fp_forn == "외국인만":
-                fp = fp[fp["FORN_GB"] == "F"]
+            def _fp_filter(tbl):
+                t = tbl
+                if fp_sel_city != "전체":
+                    t = t[t["CTY_NM"] == fp_sel_city]
+                if fp_sel_dong != "전체":
+                    t = t[t["ADMI_NM"] == fp_sel_dong]
+                if fp_forn == "내국인만":
+                    t = t[t["FORN_GB"] == "N"]
+                elif fp_forn == "외국인만":
+                    t = t[t["FORN_GB"] == "F"]
+                return t
 
             st.divider()
 
             # ══════════════════════════════════════════════════
-            # [기능 2] 시간대별 유동인구 히트맵
+            # [기능 2] 시간대 × 요일 히트맵
             # ══════════════════════════════════════════════════
             st.markdown("#### ⏰ 시간대 × 요일 유동인구 히트맵")
-            st.caption("어느 요일·시간대에 유동인구가 집중되는지 보여줍니다. 매출 피크와 비교해 보세요.")
+            st.caption("어느 요일·시간대에 유동인구가 집중되는지 보여줍니다.")
 
-            fp_dow = fp.copy()
-            fp_dow["DOW"] = fp_dow["ETL_YMD"].dt.dayofweek  # 0=월
             dow_label = {0:"월",1:"화",2:"수",3:"목",4:"금",5:"토",6:"일"}
-            fp_dow["DOW_LABEL"] = fp_dow["DOW"].map(dow_label)
-
-            hm_data = (
-                fp_dow.groupby(["DOW_LABEL", "TIME_CD"])["TOTAL_CNT"]
-                .mean()
-                .reset_index()
-            )
             dow_order = ["월","화","수","목","금","토","일"]
-            hm_pivot = hm_data.pivot(index="DOW_LABEL", columns="TIME_CD", values="TOTAL_CNT").reindex(dow_order)
+            hm_filtered = _fp_filter(fp_hm)
+            hm_filtered = hm_filtered.copy()
+            hm_filtered["DOW_LABEL"] = hm_filtered["DOW"].map(dow_label)
+            hm_data = (hm_filtered.groupby(["DOW_LABEL","TIME_CD"])["TOTAL_CNT"]
+                       .mean().reset_index())
+            hm_pivot = (hm_data.pivot(index="DOW_LABEL", columns="TIME_CD", values="TOTAL_CNT")
+                        .reindex(dow_order))
 
             fig_hm = go.Figure(go.Heatmap(
                 z=hm_pivot.values,
@@ -1611,71 +1624,53 @@ with tab_fp:
                 colorscale="Blues",
                 hovertemplate="요일: %{y}<br>시간: %{x}<br>평균 유동인구: %{z:,.0f}명<extra></extra>",
             ))
-            fig_hm.update_layout(
-                xaxis_title="시간대",
-                yaxis_title="요일",
-                height=340,
-                margin=dict(t=20, b=40),
-            )
+            fig_hm.update_layout(xaxis_title="시간대", yaxis_title="요일",
+                                 height=340, margin=dict(t=20, b=40))
             st.plotly_chart(fig_hm, use_container_width=True)
 
             st.divider()
 
             # ══════════════════════════════════════════════════
-            # [기능 3] 타겟 고객층 분석 (성별×연령대)
+            # [기능 3] 성별 × 연령대 분포
             # ══════════════════════════════════════════════════
             st.markdown("#### 👥 성별 × 연령대 유동인구 분포")
             st.caption("이 지역을 오가는 주요 고객층의 성별·연령대 비율을 확인합니다.")
 
-            age_cols_m = [c for c in fp.columns if c.startswith("M_") and c.endswith("_CNT")]
-            age_cols_f = [c for c in fp.columns if c.startswith("F_") and c.endswith("_CNT")]
-
-            def _age_label(col):
-                age_num = int(col.split("_")[1])
-                return f"{age_num}대" if age_num >= 20 else ("10대" if age_num == 15 else "10대 미만")
-
-            male_sums   = {_age_label(c): fp[c].sum() for c in age_cols_m}
-            female_sums = {_age_label(c): fp[c].sum() for c in age_cols_f}
-
-            # 연령대 통합 (같은 라벨 합산)
             from collections import defaultdict
+            age_filtered = _fp_filter(fp_age)
+            am = [c for c in AGE_COLS_M if c in age_filtered.columns]
+            af = [c for c in AGE_COLS_F if c in age_filtered.columns]
             male_agg, female_agg = defaultdict(float), defaultdict(float)
-            for c in age_cols_m:
-                male_agg[_age_label(c)] += fp[c].sum()
-            for c in age_cols_f:
-                female_agg[_age_label(c)] += fp[c].sum()
+            for c in am:
+                male_agg[_age_label(c)] += age_filtered[c].sum()
+            for c in af:
+                female_agg[_age_label(c)] += age_filtered[c].sum()
 
             age_order = ["10대 미만","10대","20대","30대","40대","50대","60대","70대 이상"]
-            male_vals   = [male_agg.get(a, 0)   for a in age_order]
-            female_vals = [female_agg.get(a, 0) for a in age_order]
-
             fig_age = go.Figure()
-            fig_age.add_bar(name="남성", x=age_order, y=male_vals,
+            fig_age.add_bar(name="남성", x=age_order,
+                            y=[male_agg.get(a,0) for a in age_order],
                             marker_color="#58a6ff",
                             hovertemplate="%{x}: %{y:,.0f}명<extra>남성</extra>")
-            fig_age.add_bar(name="여성", x=age_order, y=female_vals,
+            fig_age.add_bar(name="여성", x=age_order,
+                            y=[female_agg.get(a,0) for a in age_order],
                             marker_color="#f78166",
                             hovertemplate="%{x}: %{y:,.0f}명<extra>여성</extra>")
-            fig_age.update_layout(
-                barmode="group",
-                xaxis_title="연령대",
-                yaxis_title="유동인구 합계 (명)",
-                height=340,
-                margin=dict(t=20, b=40),
-                legend=dict(orientation="h", y=1.05),
-            )
+            fig_age.update_layout(barmode="group", xaxis_title="연령대",
+                                  yaxis_title="유동인구 합계 (명)", height=340,
+                                  margin=dict(t=20, b=40),
+                                  legend=dict(orientation="h", y=1.05))
             st.plotly_chart(fig_age, use_container_width=True)
 
             total_m = sum(male_agg.values())
             total_f = sum(female_agg.values())
             total_all = total_m + total_f
             if total_all > 0:
-                top_age_m = max(male_agg, key=male_agg.get)
-                top_age_f = max(female_agg, key=female_agg.get)
                 a1, a2, a3 = st.columns(3)
                 a1.metric("남성 비율", f"{total_m/total_all*100:.1f}%")
                 a2.metric("여성 비율", f"{total_f/total_all*100:.1f}%")
-                a3.metric("최다 연령대", f"남 {top_age_m} / 여 {top_age_f}")
+                a3.metric("최다 연령대",
+                          f"남 {max(male_agg,key=male_agg.get)} / 여 {max(female_agg,key=female_agg.get)}")
 
             st.divider()
 
@@ -1685,47 +1680,46 @@ with tab_fp:
             st.markdown("#### 🌏 내국인 vs 외국인 유동인구 비율")
             st.caption("외국인 유동인구 비율이 높은 지역은 관광·외국인 특화 상권일 가능성이 높습니다.")
 
-            forn_agg = (
-                fp_all[
-                    (fp_all["CTY_NM"] == fp_sel_city if fp_sel_city != "전체" else pd.Series(True, index=fp_all.index)) &
-                    (fp_all["ADMI_NM"] == fp_sel_dong if fp_sel_dong != "전체" else pd.Series(True, index=fp_all.index))
-                ]
-                .groupby("FORN_GB")["TOTAL_CNT"].sum()
-                .rename({"N": "내국인", "F": "외국인"})
-            )
+            forn_base = fp_age.copy()
+            if fp_sel_city != "전체":
+                forn_base = forn_base[forn_base["CTY_NM"] == fp_sel_city]
+            if fp_sel_dong != "전체":
+                forn_base = forn_base[forn_base["ADMI_NM"] == fp_sel_dong]
+
+            forn_agg = (forn_base.groupby("FORN_GB")["TOTAL_CNT"].sum()
+                        .rename({"N":"내국인","F":"외국인"}))
 
             if not forn_agg.empty and forn_agg.sum() > 0:
                 fig_forn = go.Figure(go.Pie(
-                    labels=forn_agg.index,
-                    values=forn_agg.values,
-                    marker_colors=["#58a6ff","#f78166"],
-                    hole=0.45,
+                    labels=forn_agg.index, values=forn_agg.values,
+                    marker_colors=["#58a6ff","#f78166"], hole=0.45,
                     hovertemplate="%{label}: %{value:,.0f}명 (%{percent})<extra></extra>",
                 ))
-                fig_forn.update_layout(height=320, margin=dict(t=20, b=20))
-
-                forn_col1, forn_col2 = st.columns([1, 1])
+                fig_forn.update_layout(height=320, margin=dict(t=20,b=20))
+                forn_col1, forn_col2 = st.columns(2)
                 with forn_col1:
                     st.plotly_chart(fig_forn, use_container_width=True)
                 with forn_col2:
                     forn_total = forn_agg.sum()
                     for label, val in forn_agg.items():
-                        st.metric(f"{label} 유동인구", f"{val:,.0f}명", f"{val/forn_total*100:.1f}%")
+                        st.metric(f"{label} 유동인구", f"{val:,.0f}명",
+                                  f"{val/forn_total*100:.1f}%")
 
-                # 동네별 외국인 비율 랭킹 (전체 선택 시)
                 if fp_sel_dong == "전체":
                     st.markdown("##### 외국인 비율 상위 행정동")
-                    scope = fp_all.copy()
+                    scope = fp_age.copy()
                     if fp_sel_city != "전체":
                         scope = scope[scope["CTY_NM"] == fp_sel_city]
-                    forn_by_dong = scope.groupby(["ADMI_NM","FORN_GB"])["TOTAL_CNT"].sum().unstack(fill_value=0)
-                    if "F" in forn_by_dong.columns and "N" in forn_by_dong.columns:
-                        forn_by_dong["외국인비율(%)"] = (
-                            forn_by_dong["F"] / (forn_by_dong["F"] + forn_by_dong["N"]) * 100
-                        ).round(2)
-                        top_forn = forn_by_dong.sort_values("외국인비율(%)", ascending=False).head(10).reset_index()
-                        top_forn.columns = ["행정동", "외국인", "내국인", "외국인비율(%)"]
-                        st.dataframe(top_forn[["행정동","내국인","외국인","외국인비율(%)"]], use_container_width=True)
+                    forn_dong = (scope.groupby(["ADMI_NM","FORN_GB"])["TOTAL_CNT"]
+                                 .sum().unstack(fill_value=0))
+                    if "F" in forn_dong.columns and "N" in forn_dong.columns:
+                        forn_dong["외국인비율(%)"] = (
+                            forn_dong["F"]/(forn_dong["F"]+forn_dong["N"])*100).round(2)
+                        top_forn = (forn_dong.sort_values("외국인비율(%)", ascending=False)
+                                    .head(10).reset_index())
+                        top_forn.columns = ["행정동","외국인","내국인","외국인비율(%)"]
+                        st.dataframe(top_forn[["행정동","내국인","외국인","외국인비율(%)"]],
+                                     use_container_width=True)
 
             st.divider()
 
@@ -1735,59 +1729,42 @@ with tab_fp:
             st.markdown("#### 📈 유동인구 × 매출 상관 분석")
             st.caption("같은 날짜·행정동 기준으로 유동인구와 매출을 연결해 상관관계를 분석합니다.")
 
-            # 매출 일별 집계 (admi_cty_no 기준)
             if "ta_ymd" in df.columns:
                 sales_daily = (
-                    df.groupby(["ta_ymd", "admi_cty_no"])["amt"]
-                    .sum()
-                    .reset_index()
+                    df.groupby(["ta_ymd","admi_cty_no"])["amt"].sum().reset_index()
                     .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
                 )
                 sales_daily["date"] = pd.to_datetime(sales_daily["date"])
-                # 유동인구 일별 집계 (ADMI_CD 기준, 내+외국인 합산)
-                fp_daily = (
-                    fp_all.groupby(["ETL_YMD","ADMI_CD"])["TOTAL_CNT"]
-                    .sum()
-                    .reset_index()
-                    .rename(columns={"ETL_YMD":"date","TOTAL_CNT":"FLOWPOP"})
-                )
-                fp_daily["ADMI_CD"] = fp_daily["ADMI_CD"].astype(int)
+                fp_daily_use = fp_daily.rename(columns={"ETL_YMD":"date","TOTAL_CNT":"FLOWPOP"})
+                fp_daily_use["ADMI_CD"] = fp_daily_use["ADMI_CD"].astype(int)
 
-                merged = pd.merge(
-                    sales_daily, fp_daily,
-                    left_on=["date","ADMI_CD"], right_on=["date","ADMI_CD"],
-                    how="inner"
-                )
+                merged = pd.merge(sales_daily, fp_daily_use, on=["date","ADMI_CD"], how="inner")
 
                 if merged.empty:
-                    st.info("매출 데이터와 날짜·행정동이 겹치는 데이터가 없습니다. (데이터 기간 또는 지역이 다를 수 있습니다)")
+                    st.info("매출 데이터와 날짜·행정동이 겹치는 데이터가 없습니다.")
                 else:
                     corr_val = merged["FLOWPOP"].corr(merged["SALES"])
-
-                    # 업종 필터 추가
                     corr_biz1 = st.selectbox(
-                        "업종 대분류 (상관분석용)", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()),
+                        "업종 대분류 (상관분석용)",
+                        ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()),
                         key="corr_biz1"
                     )
                     if corr_biz1 != "전체":
                         sales_biz = (
                             df[df["card_tpbuz_nm_1"] == corr_biz1]
-                            .groupby(["ta_ymd","admi_cty_no"])["amt"]
-                            .sum().reset_index()
+                            .groupby(["ta_ymd","admi_cty_no"])["amt"].sum().reset_index()
                             .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
                         )
                         sales_biz["date"] = pd.to_datetime(sales_biz["date"])
-                        merged = pd.merge(sales_biz, fp_daily, on=["date","ADMI_CD"], how="inner")
-                        if not merged.empty:
-                            corr_val = merged["FLOWPOP"].corr(merged["SALES"])
+                        m2 = pd.merge(sales_biz, fp_daily_use, on=["date","ADMI_CD"], how="inner")
+                        if not m2.empty:
+                            merged, corr_val = m2, m2["FLOWPOP"].corr(m2["SALES"])
 
                     if not merged.empty:
                         fig_corr = px.scatter(
-                            merged, x="FLOWPOP", y="SALES",
-                            trendline="ols",
+                            merged, x="FLOWPOP", y="SALES", trendline="ols",
                             labels={"FLOWPOP":"유동인구 (명)","SALES":"일별 매출 (원)"},
-                            opacity=0.6,
-                            color_discrete_sequence=["#58a6ff"],
+                            opacity=0.6, color_discrete_sequence=["#58a6ff"],
                         )
                         fig_corr.update_layout(height=380, margin=dict(t=20,b=40))
                         st.plotly_chart(fig_corr, use_container_width=True)
@@ -2004,15 +1981,12 @@ with tab_semas:
             .groupby("행정동명").size().reset_index(name="점포수")
         )
 
-        try:
-            fp_rec = load_flowpop_data(FLOWPOP_ZIP_PATH)
-            fp_available = not fp_rec.empty
-        except Exception:
-            fp_available = False
+        fp_data_rec = st.session_state.get("fp_data", {})
+        fp_available = bool(fp_data_rec) and "age" in fp_data_rec
 
         if fp_available:
             fp_dong_pop = (
-                fp_rec[fp_rec["FORN_GB"] == "N"]
+                fp_data_rec["age"][fp_data_rec["age"]["FORN_GB"] == "N"]
                 .groupby("ADMI_NM")["TOTAL_CNT"].mean()
                 .reset_index()
                 .rename(columns={"ADMI_NM": "행정동명", "TOTAL_CNT": "평균유동인구"})
