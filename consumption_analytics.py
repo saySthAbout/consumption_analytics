@@ -923,9 +923,12 @@ with tab_pred:
             ref = ref_exact if not ref_fallback else df[df["card_tpbuz_nm_2"] == sel_biz2]
 
             avg_cnt = int(round(ref["cnt"].mean())) if "cnt" in ref.columns and len(ref) > 0 else 1
-            sel_cnt = avg_cnt
+            sel_cnt = max(avg_cnt, 1)
 
             # 모델 입력 구성
+            # amt = 그룹(날짜×시간대×성별×나이대×지역×업종) 총 매출합계
+            # cnt = 그룹 내 거래 건수
+            # 모델은 cnt를 입력받아 그룹 총 amt를 예측 → 1인당 = pred_amt / cnt
             input_row = pd.DataFrame([{
                 "sex":             sel_sex,
                 "age":             sel_age,
@@ -937,44 +940,50 @@ with tab_pred:
                 "card_tpbuz_nm_2": sel_biz2,
                 "cnt":             sel_cnt,
             }])
-            encoded  = transform_with_saved_encoders(input_row)
-            raw_pred = model.predict(encoded)[0]
-            pred_amt = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
+            encoded   = transform_with_saved_encoders(input_row)
+            raw_pred  = model.predict(encoded)[0]
+            pred_grp  = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
+            pred_amt  = pred_grp / sel_cnt   # 1인(1건)당 소비금액
 
-            # 실제 데이터 참조값
-            actual_mean = ref["amt"].mean() if len(ref) > 0 else 0
-            actual_med  = ref["amt"].median() if len(ref) > 0 else 0
+            # 실제 데이터 1인당 소비금액 = 각 행의 amt/cnt 평균·중앙값
+            ref_per_person = ref["amt"] / ref["cnt"].clip(lower=1)
+            actual_mean = ref_per_person.mean() if len(ref) > 0 else 0
+            actual_med  = ref_per_person.median() if len(ref) > 0 else 0
 
             # 결과 표시
+            st.info("ℹ️ **구매 고객 기준**: 카드 결제 데이터 특성상 실제 결제가 발생한 고객만 집계됩니다. 방문했으나 결제하지 않은 고객은 포함되지 않습니다.")
             st.success(
                 f"### {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} {sel_hour_label} "
-                f"· {sel_age_label} {sel_sex_label} 예측 1인당 소비금액: **{fmt(pred_amt)}**"
+                f"· {sel_age_label} {sel_sex_label}  예측 1인당 소비금액: **{fmt(pred_amt)}**"
             )
 
             r1, r2, r3 = st.columns(3)
-            r1.metric("예측 1인당 소비금액", fmt(pred_amt))
-            r2.metric("실제 데이터 평균", fmt(actual_mean), help=f"참조 데이터 {len(ref):,}건 기준")
-            r3.metric("실제 데이터 중앙값", fmt(actual_med))
+            r1.metric("예측 1인당 소비금액", fmt(pred_amt),
+                      help=f"모델 예측 그룹 총매출({fmt(pred_grp)}) ÷ 평균 거래건수({sel_cnt}건)")
+            r2.metric("실제 1인당 평균", fmt(actual_mean),
+                      help=f"참조 데이터 {len(ref):,}건 기준 · amt÷cnt 평균")
+            r3.metric("실제 1인당 중앙값", fmt(actual_med))
 
             # 유사 조건 분포 차트
             if len(ref) >= 5:
                 st.divider()
-                st.markdown("#### 📊 유사 조건 소비금액 분포")
+                st.markdown("#### 📊 유사 조건 1인당 소비금액 분포 (구매 고객 기준)")
                 if ref_fallback:
                     st.caption(
-                        f"⚠️ 선택 조건(업종·요일·월·성별·나이대·시간대 일치)으로 조회된 데이터가 5건 미만이어서 "
+                        f"⚠️ 선택 조건(업종·요일·월·성별·나이대·시간대 일치) 데이터가 5건 미만이어서 "
                         f"**{sel_biz2} 전체** 데이터({len(ref):,}건)로 대체 표시합니다."
                     )
                 else:
                     st.caption(
-                        f"선택 조건과 정확히 일치하는 실제 거래 {len(ref):,}건의 소비금액 분포입니다. "
-                        f"상위 5% 극단값({fmt(ref['amt'].quantile(0.95))} 초과)은 제외하여 표시합니다."
+                        f"선택 조건과 정확히 일치하는 실제 거래 {len(ref):,}건 기준 · "
+                        f"각 거래 그룹의 amt ÷ cnt (1인당 금액) · 상위 5% 극단값 제외"
                     )
-                amt_clip = ref["amt"].clip(upper=ref["amt"].quantile(0.95))
+                # 분포는 1인당 금액(amt/cnt) 기준으로 표시
+                per_person_clip = ref_per_person.clip(upper=ref_per_person.quantile(0.95))
                 fig_dist = go.Figure(go.Histogram(
-                    x=amt_clip, nbinsx=30,
+                    x=per_person_clip, nbinsx=30,
                     marker_color="#58a6ff", opacity=0.8,
-                    hovertemplate="소비금액: %{x:,.0f}원<br>건수: %{y}<extra></extra>",
+                    hovertemplate="1인당 소비금액: %{x:,.0f}원<br>건수: %{y}<extra></extra>",
                 ))
                 fig_dist.add_vline(x=pred_amt, line_color="#f78166", line_dash="dash",
                                    annotation_text=f"예측값 {fmt(pred_amt)}", annotation_position="top right")
@@ -991,49 +1000,56 @@ with tab_pred:
             st.markdown("#### 👥 동일 업종 내 조건별 평균 소비금액 비교")
             biz_ref = df[df["card_tpbuz_nm_2"] == sel_biz2]
 
+            # 비교 차트도 1인당(amt/cnt) 기준으로 계산
+            biz_ref = biz_ref.copy()
+            biz_ref["amt_per"] = biz_ref["amt"] / biz_ref["cnt"].clip(lower=1)
+
             cmp1, cmp2 = st.columns(2)
             with cmp1:
-                age_avg = (biz_ref.groupby("age")["amt"].mean().reset_index())
+                age_avg = biz_ref.groupby("age")["amt_per"].mean().reset_index()
                 age_avg["연령대"] = age_avg["age"].map(AGE_MAP)
                 colors = ["#f78166" if a == sel_age else "#58a6ff" for a in age_avg["age"]]
                 fig_age = go.Figure(go.Bar(
-                    x=age_avg["연령대"], y=age_avg["amt"],
+                    x=age_avg["연령대"], y=age_avg["amt_per"],
                     marker_color=colors,
                     hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
                 ))
-                fig_age.update_layout(title="연령대별 평균 소비", xaxis_title="연령대",
-                                      yaxis_title="평균 소비금액 (원)", height=300, margin=dict(t=40,b=40))
+                fig_age.update_layout(title="연령대별 1인당 평균 소비 (구매 고객 기준)",
+                                      xaxis_title="연령대", yaxis_title="1인당 소비금액 (원)",
+                                      height=300, margin=dict(t=40, b=40))
                 st.plotly_chart(fig_age, use_container_width=True)
 
             with cmp2:
-                sex_avg = (biz_ref.groupby("sex")["amt"].mean().reset_index())
+                sex_avg = biz_ref.groupby("sex")["amt_per"].mean().reset_index()
                 sex_avg["성별"] = sex_avg["sex"].map(SEX_MAP)
                 colors_s = ["#f78166" if s == sel_sex else "#58a6ff" for s in sex_avg["sex"]]
                 fig_sex = go.Figure(go.Bar(
-                    x=sex_avg["성별"], y=sex_avg["amt"],
+                    x=sex_avg["성별"], y=sex_avg["amt_per"],
                     marker_color=colors_s,
                     hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
                 ))
-                fig_sex.update_layout(title="성별 평균 소비", xaxis_title="성별",
-                                      yaxis_title="평균 소비금액 (원)", height=300, margin=dict(t=40,b=40))
+                fig_sex.update_layout(title="성별 1인당 평균 소비 (구매 고객 기준)",
+                                      xaxis_title="성별", yaxis_title="1인당 소비금액 (원)",
+                                      height=300, margin=dict(t=40, b=40))
                 st.plotly_chart(fig_sex, use_container_width=True)
 
-            hour_avg = (biz_ref.groupby("hour")["amt"].mean().reset_index())
+            hour_avg = biz_ref.groupby("hour")["amt_per"].mean().reset_index()
             hour_avg["시간대"] = hour_avg["hour"].map(HOUR_MAP)
             colors_h = ["#f78166" if h == sel_hour else "#58a6ff" for h in hour_avg["hour"]]
             fig_hour = go.Figure(go.Bar(
-                x=hour_avg["시간대"], y=hour_avg["amt"],
+                x=hour_avg["시간대"], y=hour_avg["amt_per"],
                 marker_color=colors_h,
                 hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
             ))
-            fig_hour.update_layout(title="시간대별 평균 소비", xaxis_title="시간대",
-                                   yaxis_title="평균 소비금액 (원)", height=300,
-                                   margin=dict(t=40,b=40), xaxis_tickangle=-30)
+            fig_hour.update_layout(title="시간대별 1인당 평균 소비 (구매 고객 기준)",
+                                   xaxis_title="시간대", yaxis_title="1인당 소비금액 (원)",
+                                   height=300, margin=dict(t=40, b=40), xaxis_tickangle=-30)
             st.plotly_chart(fig_hour, use_container_width=True)
 
             st.caption(
                 f"※ 선택 조건: {sel_district} {sel_admi_name} · {sel_biz2} · "
-                f"{sel_month}월 {sel_day_label} {sel_hour_label} · {sel_age_label} {sel_sex_label}"
+                f"{sel_month}월 {sel_day_label} {sel_hour_label} · {sel_age_label} {sel_sex_label} | "
+                f"구매 고객 기준 (카드 실결제자 한정)"
             )
 
         except Exception as e:
