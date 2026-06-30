@@ -1421,6 +1421,18 @@ with tab_pred:
 # ℹ️ 데이터 정보 (구 탭1)
 # =====================================================
 with tab_ov:
+    st.subheader("데이터 출처")
+    st.markdown("""
+| 데이터 | 출처 | 링크 |
+|--------|------|------|
+| 경기도 카드 소비 데이터 (tbsh_gyeonggi_day) | 공공데이터포털 | [data.go.kr](https://www.data.go.kr) |
+| 경기도 유동인구 데이터 (flowpop_admi) | 공공데이터포털 | [data.go.kr](https://www.data.go.kr) |
+| 경기도 상권 정보 (SEMAS) | 소상공인시장진흥공단 상권정보시스템 | [sg.sbiz.or.kr](https://sg.sbiz.or.kr) |
+| 행정동 코드 (city_admin_code) | 행정안전부 행정표준코드관리시스템 | [code.go.kr](https://www.code.go.kr) |
+""")
+    st.caption("※ 본 서비스는 공공데이터 활용 목적으로 제작되었으며, 데이터 원본의 저작권은 각 제공 기관에 있습니다.")
+    st.divider()
+
     st.subheader("학습 데이터 정보")
     n_files = _mi.get("n_files", len(glob.glob(os.path.join(DATASET_DIR, "tbsh_gyeonggi_day_*.csv"))))
     first_name = os.path.basename(sales_path)
