@@ -104,6 +104,16 @@ FEATURE_COLUMNS_PATH = os.path.join(ENCODER_DIR, "feature_columns.pkl")
 LSTM_MODEL_PATH      = os.path.join(MODEL_DIR,   "lstm_model.pkl")
 CLUSTER_MODEL_PATH   = os.path.join(MODEL_DIR,   "cluster_model.pkl")
 
+FLOWPOP_ZIP_PATH = os.path.join(
+    os.path.expanduser("~"), "Downloads",
+    "유동인구_행정동 단위 집계_202601-202603.zip"
+)
+
+SEMAS_DIR      = DATASET_DIR
+SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
+SEMAS_ZIP_PATH = os.path.join(DATASET_DIR, SEMAS_ZIP_NAME)
+SEMAS_GDRIVE_FILE_ID = "1Gp573SzYdObGWVi4r6hSJFX0oFumq8qr"
+
 GDRIVE_FILE_ID   = "1JnLZDcT0OY2bAQLcinH_eSXpzg9hS7RY"
 GDRIVE_FILE_NAME = "tbsh_gyeonggi_day_202602_hwaseungsi.csv"
 
@@ -123,6 +133,33 @@ def ensure_sales_data():
     url  = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
     with st.spinner("매출 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회)"):
         gdown.download(url, dest, quiet=False)
+
+def ensure_semas_data():
+    """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
+    # CSV가 이미 하나라도 있으면 스킵
+    if glob.glob(os.path.join(SEMAS_DIR, "semas_store_info_*.csv")):
+        return
+    # zip이 있으면 바로 해제
+    if os.path.exists(SEMAS_ZIP_PATH):
+        _extract_semas_zip()
+        return
+    # zip도 없고 Drive ID도 없으면 패스 (탭에서 경고 표시)
+    if not SEMAS_GDRIVE_FILE_ID:
+        return
+    import gdown
+    os.makedirs(DATASET_DIR, exist_ok=True)
+    url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
+    with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
+        gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+    _extract_semas_zip()
+
+
+def _extract_semas_zip():
+    import zipfile
+    with st.spinner("상가 데이터 압축 해제 중..."):
+        with zipfile.ZipFile(SEMAS_ZIP_PATH, "r") as zf:
+            zf.extractall(SEMAS_DIR)
+
 
 ADMIN_CODE_PATHS = [
     os.path.join(DATASET_DIR, "city_admin_code.csv"),
@@ -237,6 +274,108 @@ DISTRICT_MAP = {
     "41670": "김포시",
     "41800": "여주시",
 }
+
+@st.cache_data
+def load_flowpop_data(zip_path: str):
+    """유동인구 zip 파일에서 전체 CSV를 읽어 하나의 DataFrame으로 반환."""
+    import zipfile, io
+    frames = []
+    with zipfile.ZipFile(zip_path) as z:
+        for name in z.namelist():
+            if not name.endswith(".csv"):
+                continue
+            with z.open(name) as f:
+                try:
+                    chunk = pd.read_csv(io.BytesIO(f.read()), encoding="utf-8")
+                    frames.append(chunk)
+                except Exception:
+                    pass
+    if not frames:
+        return pd.DataFrame()
+    fp = pd.concat(frames, ignore_index=True)
+    fp["ETL_YMD"] = pd.to_datetime(fp["ETL_YMD"].astype(str), format="%Y%m%d", errors="coerce")
+    # 성별×연령대 컬럼을 long 형식으로도 미리 준비
+    age_cols_m = [c for c in fp.columns if c.startswith("M_") and c.endswith("_CNT")]
+    age_cols_f = [c for c in fp.columns if c.startswith("F_") and c.endswith("_CNT")]
+    # 합계 컬럼
+    fp["TOTAL_CNT"] = fp[age_cols_m + age_cols_f].sum(axis=1)
+    fp["MALE_CNT"]  = fp[age_cols_m].sum(axis=1)
+    fp["FEMALE_CNT"] = fp[age_cols_f].sum(axis=1)
+    return fp
+
+
+def _flowpop_long(fp: pd.DataFrame) -> pd.DataFrame:
+    """유동인구를 성별×연령대 long 형식으로 변환."""
+    age_map = {
+        "10": "10대 미만", "15": "10대", "20": "20대", "25": "20대후반",
+        "30": "30대", "35": "30대후반", "40": "40대", "45": "40대후반",
+        "50": "50대", "55": "50대후반", "60": "60대", "65": "60대후반", "70": "70대 이상"
+    }
+    records = []
+    for _, row in fp.iterrows():
+        for prefix, sex_label in [("M", "남성"), ("F", "여성")]:
+            for key, age_label in age_map.items():
+                col = f"{prefix}_{key}_CNT"
+                if col in fp.columns:
+                    records.append({
+                        "ADMI_CD": row["ADMI_CD"],
+                        "CTY_NM": row.get("CTY_NM"),
+                        "ADMI_NM": row.get("ADMI_NM"),
+                        "ETL_YMD": row["ETL_YMD"],
+                        "TIME_CD": row["TIME_CD"],
+                        "FORN_GB": row["FORN_GB"],
+                        "SEX": sex_label,
+                        "AGE_GRP": age_label,
+                        "CNT": row[col],
+                    })
+    return pd.DataFrame(records)
+
+
+@st.cache_data
+def load_semas_data(semas_dir: str, zip_path: str) -> pd.DataFrame:
+    """SEMAS 상가 데이터 로드 — CSV 파일 또는 zip에서 읽음."""
+    use_cols = [
+        "상가업소번호", "상호명", "상권업종대분류명",
+        "상권업종중분류명", "상권업종소분류명",
+        "시도명", "시군구명", "행정동명", "행정동코드",
+        "도로명주소", "경도", "위도",
+    ]
+
+    def _read_csv_bytes(raw_bytes):
+        import io
+        return pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8", usecols=use_cols)
+
+    frames = []
+
+    # 1) CSV 파일이 이미 풀려 있으면 그대로 사용
+    csv_files = sorted(glob.glob(os.path.join(semas_dir, "semas_store_info_*.csv")))
+    if csv_files:
+        for fp in csv_files:
+            try:
+                frames.append(pd.read_csv(fp, encoding="utf-8", usecols=use_cols))
+            except Exception:
+                pass
+
+    # 2) CSV 없으면 zip에서 직접 읽기
+    elif os.path.exists(zip_path):
+        import zipfile, io
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for name in zf.namelist():
+                if name.endswith(".csv"):
+                    try:
+                        frames.append(_read_csv_bytes(zf.read(name)))
+                    except Exception:
+                        pass
+
+    if not frames:
+        return pd.DataFrame()
+
+    semas = pd.concat(frames, ignore_index=True)
+    semas = semas.dropna(subset=["경도", "위도"])
+    semas["경도"] = pd.to_numeric(semas["경도"], errors="coerce")
+    semas["위도"] = pd.to_numeric(semas["위도"], errors="coerce")
+    return semas
+
 
 def build_admin_maps(admin_df):
     admin_df = admin_df.copy()
@@ -661,13 +800,15 @@ except Exception:
     admin_path              = "-"
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_pred, tab_hm, tab_eda, tab_lstm, tab_cluster, tab_ai, tab_ov = st.tabs([
+tab_pred, tab_hm, tab_eda, tab_lstm, tab_cluster, tab_ai, tab_fp, tab_semas, tab_ov = st.tabs([
     "💰 매출 예측",
     "⏰ 시간대·요일 분석",
     "📊 소비 트렌드",
     "📈 시계열 예측",
     "👥 고객 군집 분석",
     "📝 AI 리포트",
+    "🚶 유동인구 분석",
+    "🏪 상권 분석",
     "ℹ️ 데이터 정보",
 ])
 
@@ -1027,10 +1168,25 @@ with tab_lstm:
         # ta_ymd는 로드 시 이미 datetime으로 변환됨
         date_col = "ta_ymd" if "ta_ymd" in lt_df.columns else "date"
         lt_df["_date"] = pd.to_datetime(lt_df[date_col], errors="coerce")
-        daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
-        daily = daily.rename(columns={"_date": "date"})
+        all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
+        all_daily = all_daily.rename(columns={"_date": "date"})
 
-        FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
+        # ── 시작일자 설정 ──
+        min_date = all_daily["date"].min().date()
+        max_date = all_daily["date"].max().date()
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            start_date = st.date_input(
+                "시작일자",
+                value=min_date,
+                min_value=min_date,
+                max_value=max_date,
+                key="lt_start_date"
+            )
+        with sc2:
+            FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
+
+        daily = all_daily[all_daily["date"] >= pd.Timestamp(start_date)]
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -1265,7 +1421,23 @@ with tab_ai:
         ai_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == ai_biz1]["card_tpbuz_nm_2"].dropna().unique()) if ai_biz1 != "전체" else ["전체"]
         ai_biz2      = st.selectbox("업종 중분류", ai_biz2_opts, key="ai_biz2")
 
-    if st.button("📝 AI 리포트 생성", type="primary"):
+    # 버튼 활성화 조건 검사
+    _ai_missing = []
+    if not api_key:
+        _ai_missing.append("OpenAI API Key")
+    if admin_ok and ai_district == "전체":
+        _ai_missing.append("지역 (시/구)")
+    if admin_ok and ai_admi_name == "전체":
+        _ai_missing.append("동네 선택")
+    if ai_biz1 == "전체":
+        _ai_missing.append("업종 대분류")
+    if ai_biz2 == "전체":
+        _ai_missing.append("업종 중분류")
+
+    if _ai_missing:
+        st.info(f"다음 항목을 모두 입력해야 리포트를 생성할 수 있습니다: **{', '.join(_ai_missing)}**")
+
+    if st.button("📝 AI 리포트 생성", type="primary", disabled=bool(_ai_missing)):
         if not api_key:
             st.warning("OpenAI API Key를 입력해주세요.")
         else:
@@ -1350,3 +1522,613 @@ with tab_ai:
                         )
                 except Exception as e:
                     st.error(f"AI 리포트 생성 오류: {e}")
+
+# =====================================================
+# 🚶 유동인구 분석
+# =====================================================
+with tab_fp:
+    st.subheader("유동인구 분석")
+    st.caption("행정동 단위 시간대별 유동인구 데이터를 기반으로 상권 방문 패턴을 분석합니다.")
+
+    if not os.path.exists(FLOWPOP_ZIP_PATH):
+        st.warning(
+            f"유동인구 데이터 파일을 찾을 수 없습니다.\n\n"
+            f"**{FLOWPOP_ZIP_PATH}** 경로에 zip 파일을 배치해 주세요."
+        )
+    else:
+        fp_all = load_flowpop_data(FLOWPOP_ZIP_PATH)
+
+        if fp_all.empty:
+            st.error("유동인구 데이터를 불러오지 못했습니다.")
+        else:
+            # ── 공통 필터 ──────────────────────────────────────
+            fp_areas = sorted(fp_all["CTY_NM"].dropna().unique())
+            fp_dongs = sorted(fp_all["ADMI_NM"].dropna().unique())
+
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                fp_sel_city = st.selectbox("시/구 선택", ["전체"] + fp_areas, key="fp_city")
+            with fc2:
+                if fp_sel_city != "전체":
+                    dong_pool = sorted(fp_all[fp_all["CTY_NM"] == fp_sel_city]["ADMI_NM"].dropna().unique())
+                else:
+                    dong_pool = fp_dongs
+                fp_sel_dong = st.selectbox("행정동 선택", ["전체"] + dong_pool, key="fp_dong")
+
+            fp_forn = st.radio(
+                "내/외국인 구분", ["전체", "내국인만", "외국인만"],
+                horizontal=True, key="fp_forn"
+            )
+
+            # 필터 적용
+            fp = fp_all.copy()
+            if fp_sel_city != "전체":
+                fp = fp[fp["CTY_NM"] == fp_sel_city]
+            if fp_sel_dong != "전체":
+                fp = fp[fp["ADMI_NM"] == fp_sel_dong]
+            if fp_forn == "내국인만":
+                fp = fp[fp["FORN_GB"] == "N"]
+            elif fp_forn == "외국인만":
+                fp = fp[fp["FORN_GB"] == "F"]
+
+            st.divider()
+
+            # ══════════════════════════════════════════════════
+            # [기능 2] 시간대별 유동인구 히트맵
+            # ══════════════════════════════════════════════════
+            st.markdown("#### ⏰ 시간대 × 요일 유동인구 히트맵")
+            st.caption("어느 요일·시간대에 유동인구가 집중되는지 보여줍니다. 매출 피크와 비교해 보세요.")
+
+            fp_dow = fp.copy()
+            fp_dow["DOW"] = fp_dow["ETL_YMD"].dt.dayofweek  # 0=월
+            dow_label = {0:"월",1:"화",2:"수",3:"목",4:"금",5:"토",6:"일"}
+            fp_dow["DOW_LABEL"] = fp_dow["DOW"].map(dow_label)
+
+            hm_data = (
+                fp_dow.groupby(["DOW_LABEL", "TIME_CD"])["TOTAL_CNT"]
+                .mean()
+                .reset_index()
+            )
+            dow_order = ["월","화","수","목","금","토","일"]
+            hm_pivot = hm_data.pivot(index="DOW_LABEL", columns="TIME_CD", values="TOTAL_CNT").reindex(dow_order)
+
+            fig_hm = go.Figure(go.Heatmap(
+                z=hm_pivot.values,
+                x=[f"{h}시" for h in hm_pivot.columns],
+                y=hm_pivot.index,
+                colorscale="Blues",
+                hovertemplate="요일: %{y}<br>시간: %{x}<br>평균 유동인구: %{z:,.0f}명<extra></extra>",
+            ))
+            fig_hm.update_layout(
+                xaxis_title="시간대",
+                yaxis_title="요일",
+                height=340,
+                margin=dict(t=20, b=40),
+            )
+            st.plotly_chart(fig_hm, use_container_width=True)
+
+            st.divider()
+
+            # ══════════════════════════════════════════════════
+            # [기능 3] 타겟 고객층 분석 (성별×연령대)
+            # ══════════════════════════════════════════════════
+            st.markdown("#### 👥 성별 × 연령대 유동인구 분포")
+            st.caption("이 지역을 오가는 주요 고객층의 성별·연령대 비율을 확인합니다.")
+
+            age_cols_m = [c for c in fp.columns if c.startswith("M_") and c.endswith("_CNT")]
+            age_cols_f = [c for c in fp.columns if c.startswith("F_") and c.endswith("_CNT")]
+
+            def _age_label(col):
+                age_num = int(col.split("_")[1])
+                return f"{age_num}대" if age_num >= 20 else ("10대" if age_num == 15 else "10대 미만")
+
+            male_sums   = {_age_label(c): fp[c].sum() for c in age_cols_m}
+            female_sums = {_age_label(c): fp[c].sum() for c in age_cols_f}
+
+            # 연령대 통합 (같은 라벨 합산)
+            from collections import defaultdict
+            male_agg, female_agg = defaultdict(float), defaultdict(float)
+            for c in age_cols_m:
+                male_agg[_age_label(c)] += fp[c].sum()
+            for c in age_cols_f:
+                female_agg[_age_label(c)] += fp[c].sum()
+
+            age_order = ["10대 미만","10대","20대","30대","40대","50대","60대","70대 이상"]
+            male_vals   = [male_agg.get(a, 0)   for a in age_order]
+            female_vals = [female_agg.get(a, 0) for a in age_order]
+
+            fig_age = go.Figure()
+            fig_age.add_bar(name="남성", x=age_order, y=male_vals,
+                            marker_color="#58a6ff",
+                            hovertemplate="%{x}: %{y:,.0f}명<extra>남성</extra>")
+            fig_age.add_bar(name="여성", x=age_order, y=female_vals,
+                            marker_color="#f78166",
+                            hovertemplate="%{x}: %{y:,.0f}명<extra>여성</extra>")
+            fig_age.update_layout(
+                barmode="group",
+                xaxis_title="연령대",
+                yaxis_title="유동인구 합계 (명)",
+                height=340,
+                margin=dict(t=20, b=40),
+                legend=dict(orientation="h", y=1.05),
+            )
+            st.plotly_chart(fig_age, use_container_width=True)
+
+            total_m = sum(male_agg.values())
+            total_f = sum(female_agg.values())
+            total_all = total_m + total_f
+            if total_all > 0:
+                top_age_m = max(male_agg, key=male_agg.get)
+                top_age_f = max(female_agg, key=female_agg.get)
+                a1, a2, a3 = st.columns(3)
+                a1.metric("남성 비율", f"{total_m/total_all*100:.1f}%")
+                a2.metric("여성 비율", f"{total_f/total_all*100:.1f}%")
+                a3.metric("최다 연령대", f"남 {top_age_m} / 여 {top_age_f}")
+
+            st.divider()
+
+            # ══════════════════════════════════════════════════
+            # [기능 4] 내국인 vs 외국인 비율
+            # ══════════════════════════════════════════════════
+            st.markdown("#### 🌏 내국인 vs 외국인 유동인구 비율")
+            st.caption("외국인 유동인구 비율이 높은 지역은 관광·외국인 특화 상권일 가능성이 높습니다.")
+
+            forn_agg = (
+                fp_all[
+                    (fp_all["CTY_NM"] == fp_sel_city if fp_sel_city != "전체" else pd.Series(True, index=fp_all.index)) &
+                    (fp_all["ADMI_NM"] == fp_sel_dong if fp_sel_dong != "전체" else pd.Series(True, index=fp_all.index))
+                ]
+                .groupby("FORN_GB")["TOTAL_CNT"].sum()
+                .rename({"N": "내국인", "F": "외국인"})
+            )
+
+            if not forn_agg.empty and forn_agg.sum() > 0:
+                fig_forn = go.Figure(go.Pie(
+                    labels=forn_agg.index,
+                    values=forn_agg.values,
+                    marker_colors=["#58a6ff","#f78166"],
+                    hole=0.45,
+                    hovertemplate="%{label}: %{value:,.0f}명 (%{percent})<extra></extra>",
+                ))
+                fig_forn.update_layout(height=320, margin=dict(t=20, b=20))
+
+                forn_col1, forn_col2 = st.columns([1, 1])
+                with forn_col1:
+                    st.plotly_chart(fig_forn, use_container_width=True)
+                with forn_col2:
+                    forn_total = forn_agg.sum()
+                    for label, val in forn_agg.items():
+                        st.metric(f"{label} 유동인구", f"{val:,.0f}명", f"{val/forn_total*100:.1f}%")
+
+                # 동네별 외국인 비율 랭킹 (전체 선택 시)
+                if fp_sel_dong == "전체":
+                    st.markdown("##### 외국인 비율 상위 행정동")
+                    scope = fp_all.copy()
+                    if fp_sel_city != "전체":
+                        scope = scope[scope["CTY_NM"] == fp_sel_city]
+                    forn_by_dong = scope.groupby(["ADMI_NM","FORN_GB"])["TOTAL_CNT"].sum().unstack(fill_value=0)
+                    if "F" in forn_by_dong.columns and "N" in forn_by_dong.columns:
+                        forn_by_dong["외국인비율(%)"] = (
+                            forn_by_dong["F"] / (forn_by_dong["F"] + forn_by_dong["N"]) * 100
+                        ).round(2)
+                        top_forn = forn_by_dong.sort_values("외국인비율(%)", ascending=False).head(10).reset_index()
+                        top_forn.columns = ["행정동", "외국인", "내국인", "외국인비율(%)"]
+                        st.dataframe(top_forn[["행정동","내국인","외국인","외국인비율(%)"]], use_container_width=True)
+
+            st.divider()
+
+            # ══════════════════════════════════════════════════
+            # [기능 1] 유동인구 × 매출 상관 분석
+            # ══════════════════════════════════════════════════
+            st.markdown("#### 📈 유동인구 × 매출 상관 분석")
+            st.caption("같은 날짜·행정동 기준으로 유동인구와 매출을 연결해 상관관계를 분석합니다.")
+
+            # 매출 일별 집계 (admi_cty_no 기준)
+            if "ta_ymd" in df.columns:
+                sales_daily = (
+                    df.groupby(["ta_ymd", "admi_cty_no"])["amt"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
+                )
+                sales_daily["date"] = pd.to_datetime(sales_daily["date"])
+                # 유동인구 일별 집계 (ADMI_CD 기준, 내+외국인 합산)
+                fp_daily = (
+                    fp_all.groupby(["ETL_YMD","ADMI_CD"])["TOTAL_CNT"]
+                    .sum()
+                    .reset_index()
+                    .rename(columns={"ETL_YMD":"date","TOTAL_CNT":"FLOWPOP"})
+                )
+                fp_daily["ADMI_CD"] = fp_daily["ADMI_CD"].astype(int)
+
+                merged = pd.merge(
+                    sales_daily, fp_daily,
+                    left_on=["date","ADMI_CD"], right_on=["date","ADMI_CD"],
+                    how="inner"
+                )
+
+                if merged.empty:
+                    st.info("매출 데이터와 날짜·행정동이 겹치는 데이터가 없습니다. (데이터 기간 또는 지역이 다를 수 있습니다)")
+                else:
+                    corr_val = merged["FLOWPOP"].corr(merged["SALES"])
+
+                    # 업종 필터 추가
+                    corr_biz1 = st.selectbox(
+                        "업종 대분류 (상관분석용)", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()),
+                        key="corr_biz1"
+                    )
+                    if corr_biz1 != "전체":
+                        sales_biz = (
+                            df[df["card_tpbuz_nm_1"] == corr_biz1]
+                            .groupby(["ta_ymd","admi_cty_no"])["amt"]
+                            .sum().reset_index()
+                            .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
+                        )
+                        sales_biz["date"] = pd.to_datetime(sales_biz["date"])
+                        merged = pd.merge(sales_biz, fp_daily, on=["date","ADMI_CD"], how="inner")
+                        if not merged.empty:
+                            corr_val = merged["FLOWPOP"].corr(merged["SALES"])
+
+                    if not merged.empty:
+                        fig_corr = px.scatter(
+                            merged, x="FLOWPOP", y="SALES",
+                            trendline="ols",
+                            labels={"FLOWPOP":"유동인구 (명)","SALES":"일별 매출 (원)"},
+                            opacity=0.6,
+                            color_discrete_sequence=["#58a6ff"],
+                        )
+                        fig_corr.update_layout(height=380, margin=dict(t=20,b=40))
+                        st.plotly_chart(fig_corr, use_container_width=True)
+
+                        strength = (
+                            "강한 양의 상관" if corr_val > 0.7 else
+                            "중간 양의 상관" if corr_val > 0.4 else
+                            "약한 양의 상관" if corr_val > 0.1 else
+                            "거의 무상관" if corr_val > -0.1 else
+                            "음의 상관"
+                        )
+                        cr1, cr2, cr3 = st.columns(3)
+                        cr1.metric("피어슨 상관계수", f"{corr_val:.3f}")
+                        cr2.metric("상관 강도", strength)
+                        cr3.metric("분석 데이터 포인트", f"{len(merged):,}건")
+            else:
+                st.info("매출 데이터에 날짜 컬럼(ta_ymd)이 없어 상관 분석을 수행할 수 없습니다.")
+
+# =====================================================
+# 🏪 상권 분석 (SEMAS 소상공인 상가 데이터)
+# =====================================================
+with tab_semas:
+    st.subheader("전국 상권 분석")
+    st.caption("소상공인시장진흥공단 상가(상권)정보를 기반으로 업종 분포·경쟁 강도·입지 추천·주변 상권을 분석합니다.")
+
+    ensure_semas_data()
+    semas_df = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+
+    if semas_df.empty:
+        st.warning(
+            "`dataset/semas_store_info_202603.zip` 또는 CSV 파일을 찾을 수 없습니다. "
+            "Google Drive 파일 ID(`SEMAS_GDRIVE_FILE_ID`)를 코드에 입력하거나 "
+            "zip 파일을 dataset 폴더에 직접 배치해 주세요."
+        )
+    else:
+        # ── 공통 필터 ─────────────────────────────────────────
+        sido_list = sorted(semas_df["시도명"].dropna().unique())
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            sel_sido = st.selectbox("시/도 선택", ["전체"] + sido_list, key="sm_sido")
+        with sc2:
+            if sel_sido != "전체":
+                gu_pool = sorted(semas_df[semas_df["시도명"] == sel_sido]["시군구명"].dropna().unique())
+            else:
+                gu_pool = sorted(semas_df["시군구명"].dropna().unique())
+            sel_gu = st.selectbox("시/군/구 선택", ["전체"] + gu_pool, key="sm_gu")
+        with sc3:
+            if sel_gu != "전체":
+                dong_pool = sorted(semas_df[semas_df["시군구명"] == sel_gu]["행정동명"].dropna().unique())
+            elif sel_sido != "전체":
+                dong_pool = sorted(semas_df[semas_df["시도명"] == sel_sido]["행정동명"].dropna().unique())
+            else:
+                dong_pool = []
+            sel_dong = st.selectbox("행정동 선택", ["전체"] + dong_pool, key="sm_dong")
+
+        # 필터 적용
+        sm = semas_df.copy()
+        if sel_sido != "전체":
+            sm = sm[sm["시도명"] == sel_sido]
+        if sel_gu != "전체":
+            sm = sm[sm["시군구명"] == sel_gu]
+        if sel_dong != "전체":
+            sm = sm[sm["행정동명"] == sel_dong]
+
+        sm_biz1_list = sorted(sm["상권업종대분류명"].dropna().unique())
+        sel_biz1 = st.selectbox(
+            "업종 대분류 (전체 기능에 적용)",
+            ["전체"] + sm_biz1_list, key="sm_biz1"
+        )
+        if sel_biz1 != "전체":
+            sm = sm[sm["상권업종대분류명"] == sel_biz1]
+
+        st.caption(f"현재 조건 점포 수: **{len(sm):,}개**")
+        st.divider()
+
+        # ══════════════════════════════════════════════════════
+        # [기능 1] 상권 밀집도 지도
+        # ══════════════════════════════════════════════════════
+        st.markdown("#### 🗺️ 상권 밀집도 지도")
+        st.caption("점포 위치를 지도에 표시합니다. 색상은 업종 대분류를 나타냅니다.")
+
+        map_sample = sm.dropna(subset=["경도","위도"])
+        if len(map_sample) > 5000:
+            map_sample = map_sample.sample(5000, random_state=42)
+
+        if map_sample.empty:
+            st.info("지도에 표시할 좌표 데이터가 없습니다.")
+        else:
+            center_lat = map_sample["위도"].mean()
+            center_lon = map_sample["경도"].mean()
+
+            # 업종별 색상
+            biz_cats = map_sample["상권업종대분류명"].dropna().unique().tolist()
+            palette = px.colors.qualitative.Safe
+            color_map = {cat: palette[i % len(palette)] for i, cat in enumerate(biz_cats)}
+
+            fig_map = go.Figure()
+            for cat in biz_cats:
+                sub = map_sample[map_sample["상권업종대분류명"] == cat]
+                fig_map.add_trace(go.Scattermapbox(
+                    lat=sub["위도"], lon=sub["경도"],
+                    mode="markers",
+                    marker=dict(size=5, color=color_map[cat], opacity=0.7),
+                    name=cat,
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "%{customdata[1]} · %{customdata[2]}<extra></extra>"
+                    ),
+                    customdata=sub[["상호명","상권업종중분류명","행정동명"]].values,
+                ))
+            fig_map.update_layout(
+                mapbox=dict(
+                    style="carto-positron",
+                    center=dict(lat=center_lat, lon=center_lon),
+                    zoom=11 if sel_dong != "전체" else (12 if sel_gu != "전체" else 9),
+                ),
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=460,
+                legend=dict(orientation="v", x=0, y=1, bgcolor="rgba(0,0,0,0)"),
+            )
+            st.plotly_chart(fig_map, use_container_width=True)
+            if len(sm) > 5000:
+                st.caption(f"⚠️ 지도에는 성능을 위해 무작위 5,000개만 표시됩니다. (전체 {len(sm):,}개)")
+
+        st.divider()
+
+        # ══════════════════════════════════════════════════════
+        # [기능 2] 업종별 경쟁 강도 분석
+        # ══════════════════════════════════════════════════════
+        st.markdown("#### ⚔️ 업종별 경쟁 강도 분석")
+        st.caption("행정동 단위로 같은 업종(중분류)이 몇 개나 밀집해 있는지 경쟁 강도를 보여줍니다.")
+
+        comp_biz2_list = sorted(sm["상권업종중분류명"].dropna().unique())
+        comp_col1, comp_col2 = st.columns(2)
+        with comp_col1:
+            comp_biz2 = st.selectbox("분석할 업종 (중분류)", comp_biz2_list, key="sm_comp_biz2")
+        with comp_col2:
+            comp_top_n = st.slider("상위 행정동 수", 5, 30, 15, key="sm_comp_n")
+
+        comp_df = sm[sm["상권업종중분류명"] == comp_biz2].copy()
+        if comp_df.empty:
+            st.info("선택한 업종의 데이터가 없습니다.")
+        else:
+            comp_by_dong = (
+                comp_df.groupby(["시도명","시군구명","행정동명"])
+                .size().reset_index(name="점포수")
+                .sort_values("점포수", ascending=False)
+                .head(comp_top_n)
+            )
+            comp_by_dong["지역"] = comp_by_dong["시군구명"] + " " + comp_by_dong["행정동명"]
+
+            fig_comp = go.Figure(go.Bar(
+                x=comp_by_dong["점포수"],
+                y=comp_by_dong["지역"],
+                orientation="h",
+                marker_color="#f78166",
+                text=comp_by_dong["점포수"],
+                textposition="outside",
+                hovertemplate="%{y}: %{x}개<extra></extra>",
+            ))
+            fig_comp.update_layout(
+                xaxis_title="점포 수",
+                yaxis=dict(autorange="reversed"),
+                height=max(300, comp_top_n * 26),
+                margin=dict(t=20, b=40, r=80),
+            )
+            st.plotly_chart(fig_comp, use_container_width=True)
+
+            # 전국 동일 업종 총계 요약
+            total_comp = sm[sm["상권업종중분류명"] == comp_biz2]
+            avg_per_dong = total_comp.groupby("행정동명").size().mean()
+            cx1, cx2, cx3 = st.columns(3)
+            cx1.metric(f"'{comp_biz2}' 총 점포 수", f"{len(total_comp):,}개")
+            cx2.metric("행정동 평균 점포 수", f"{avg_per_dong:.1f}개")
+            cx3.metric("1위 동네 점포 수", f"{comp_by_dong['점포수'].iloc[0]:,}개")
+
+        st.divider()
+
+        # ══════════════════════════════════════════════════════
+        # [기능 3] 신규 창업 입지 추천
+        # ══════════════════════════════════════════════════════
+        st.markdown("#### 🎯 신규 창업 입지 추천")
+        st.caption(
+            "행정동별 **점포 수 대비 유동인구** 비율이 높은 곳 = 수요 대비 공급이 부족한 유망 입지입니다. "
+            "(유동인구 데이터가 로드된 경우에만 작동합니다)"
+        )
+
+        rec_biz2_list = sorted(semas_df["상권업종중분류명"].dropna().unique())
+        rec_col1, rec_col2 = st.columns(2)
+        with rec_col1:
+            rec_biz2 = st.selectbox("창업 희망 업종 (중분류)", rec_biz2_list, key="sm_rec_biz2")
+        with rec_col2:
+            rec_top_n = st.slider("추천 지역 수", 5, 20, 10, key="sm_rec_n")
+
+        # 업종별 행정동 점포 수
+        rec_store_cnt = (
+            semas_df[semas_df["상권업종중분류명"] == rec_biz2]
+            .groupby("행정동명").size().reset_index(name="점포수")
+        )
+
+        try:
+            fp_rec = load_flowpop_data(FLOWPOP_ZIP_PATH)
+            fp_available = not fp_rec.empty
+        except Exception:
+            fp_available = False
+
+        if fp_available:
+            fp_dong_pop = (
+                fp_rec[fp_rec["FORN_GB"] == "N"]
+                .groupby("ADMI_NM")["TOTAL_CNT"].mean()
+                .reset_index()
+                .rename(columns={"ADMI_NM": "행정동명", "TOTAL_CNT": "평균유동인구"})
+            )
+            rec_merged = pd.merge(rec_store_cnt, fp_dong_pop, on="행정동명", how="inner")
+            if rec_merged.empty:
+                st.info("유동인구와 상가 데이터가 겹치는 행정동이 없습니다. (지역이 다를 수 있습니다)")
+            else:
+                rec_merged["유동인구/점포"] = (
+                    rec_merged["평균유동인구"] / rec_merged["점포수"].clip(lower=1)
+                ).round(1)
+                rec_result = rec_merged.sort_values("유동인구/점포", ascending=False).head(rec_top_n)
+
+                fig_rec = go.Figure(go.Bar(
+                    x=rec_result["유동인구/점포"],
+                    y=rec_result["행정동명"],
+                    orientation="h",
+                    marker=dict(
+                        color=rec_result["유동인구/점포"],
+                        colorscale="Greens", showscale=True,
+                        colorbar=dict(title="유동인구/점포"),
+                    ),
+                    hovertemplate=(
+                        "%{y}<br>유동인구/점포: %{x:,.1f}<br>"
+                        "<extra></extra>"
+                    ),
+                    customdata=rec_result[["점포수","평균유동인구"]].values,
+                ))
+                fig_rec.update_layout(
+                    xaxis_title="유동인구 / 점포 수 (높을수록 유망)",
+                    yaxis=dict(autorange="reversed"),
+                    height=max(300, rec_top_n * 30),
+                    margin=dict(t=20, b=40, r=80),
+                )
+                st.plotly_chart(fig_rec, use_container_width=True)
+
+                rec_result_show = rec_result.copy()
+                rec_result_show.columns = ["행정동명","점포수","평균유동인구","유동인구/점포비율"]
+                rec_result_show["평균유동인구"] = rec_result_show["평균유동인구"].round(0).astype(int)
+                st.dataframe(rec_result_show.reset_index(drop=True), use_container_width=True)
+        else:
+            # 유동인구 없으면 점포 수 역순(경쟁 적은 곳)만 보여줌
+            st.info("유동인구 데이터가 없어 점포 수가 적은 행정동(경쟁 약한 지역)으로 대체 추천합니다.")
+            rec_scope = semas_df.copy()
+            if sel_sido != "전체":
+                rec_scope = rec_scope[rec_scope["시도명"] == sel_sido]
+            if sel_gu != "전체":
+                rec_scope = rec_scope[rec_scope["시군구명"] == sel_gu]
+            rec_low = (
+                rec_scope[rec_scope["상권업종중분류명"] == rec_biz2]
+                .groupby(["시군구명","행정동명"]).size().reset_index(name="점포수")
+                .sort_values("점포수").head(rec_top_n)
+            )
+            rec_low["지역"] = rec_low["시군구명"] + " " + rec_low["행정동명"]
+            fig_rec2 = go.Figure(go.Bar(
+                x=rec_low["점포수"], y=rec_low["지역"],
+                orientation="h", marker_color="#3fb950",
+                hovertemplate="%{y}: %{x}개<extra></extra>",
+            ))
+            fig_rec2.update_layout(
+                xaxis_title="점포 수 (적을수록 경쟁 약함)",
+                yaxis=dict(autorange="reversed"),
+                height=max(300, rec_top_n * 26),
+                margin=dict(t=20, b=40, r=80),
+            )
+            st.plotly_chart(fig_rec2, use_container_width=True)
+
+        st.divider()
+
+        # ══════════════════════════════════════════════════════
+        # [기능 4] 주변 상권 검색 (행정동 상권 생태계)
+        # ══════════════════════════════════════════════════════
+        st.markdown("#### 🔍 주변 상권 검색")
+        st.caption("행정동을 선택하면 해당 동네의 업종 구성과 점포 목록을 한눈에 확인할 수 있습니다.")
+
+        srch_sido = st.selectbox("시/도", sido_list, key="srch_sido")
+        srch_gu_pool = sorted(semas_df[semas_df["시도명"] == srch_sido]["시군구명"].dropna().unique())
+        srch_gu = st.selectbox("시/군/구", srch_gu_pool, key="srch_gu")
+        srch_dong_pool = sorted(
+            semas_df[(semas_df["시도명"] == srch_sido) & (semas_df["시군구명"] == srch_gu)]["행정동명"].dropna().unique()
+        )
+        srch_dong = st.selectbox("행정동", srch_dong_pool, key="srch_dong")
+
+        srch_df = semas_df[
+            (semas_df["시도명"] == srch_sido) &
+            (semas_df["시군구명"] == srch_gu) &
+            (semas_df["행정동명"] == srch_dong)
+        ]
+
+        if srch_df.empty:
+            st.info("해당 행정동의 상권 데이터가 없습니다.")
+        else:
+            sr1, sr2 = st.columns([1, 1])
+
+            with sr1:
+                st.markdown("##### 업종 대분류 구성")
+                pie_data = srch_df["상권업종대분류명"].value_counts().reset_index()
+                pie_data.columns = ["업종", "점포수"]
+                fig_pie = go.Figure(go.Pie(
+                    labels=pie_data["업종"],
+                    values=pie_data["점포수"],
+                    hole=0.4,
+                    marker_colors=px.colors.qualitative.Safe,
+                    hovertemplate="%{label}: %{value}개 (%{percent})<extra></extra>",
+                ))
+                fig_pie.update_layout(height=340, margin=dict(t=10, b=10))
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with sr2:
+                st.markdown("##### 업종 중분류 TOP 15")
+                mid_cnt = (
+                    srch_df["상권업종중분류명"].value_counts()
+                    .head(15).reset_index()
+                )
+                mid_cnt.columns = ["업종(중분류)", "점포수"]
+                fig_mid = go.Figure(go.Bar(
+                    x=mid_cnt["점포수"],
+                    y=mid_cnt["업종(중분류)"],
+                    orientation="h",
+                    marker_color="#58a6ff",
+                    hovertemplate="%{y}: %{x}개<extra></extra>",
+                ))
+                fig_mid.update_layout(
+                    xaxis_title="점포 수",
+                    yaxis=dict(autorange="reversed"),
+                    height=340,
+                    margin=dict(t=10, b=10, r=60),
+                )
+                st.plotly_chart(fig_mid, use_container_width=True)
+
+            # 요약 메트릭
+            m1, m2, m3 = st.columns(3)
+            m1.metric("총 점포 수", f"{len(srch_df):,}개")
+            m2.metric("업종 대분류 종류", f"{srch_df['상권업종대분류명'].nunique()}개")
+            m3.metric("업종 중분류 종류", f"{srch_df['상권업종중분류명'].nunique()}개")
+
+            st.markdown("##### 점포 목록")
+            show_cols = ["상호명","상권업종대분류명","상권업종중분류명","상권업종소분류명","도로명주소"] \
+                if "도로명주소" in srch_df.columns else \
+                ["상호명","상권업종대분류명","상권업종중분류명","상권업종소분류명"]
+            # 도로명주소가 semas_df에 없으므로 안전하게 처리
+            available = [c for c in show_cols if c in srch_df.columns]
+            st.dataframe(
+                srch_df[available].reset_index(drop=True),
+                use_container_width=True,
+                height=300,
+            )
