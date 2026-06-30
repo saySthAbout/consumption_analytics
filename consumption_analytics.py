@@ -1061,7 +1061,7 @@ with tab_hm:
         if admin_ok:
             hm_code = admin_name_to_code.get(hm_admi_name)
             if hm_code:
-                hm_df = hm_df[hm_df["admi_cty_no"] == hm_code]
+                hm_df = hm_df[hm_df["admi_cty_no"].astype(int) == int(hm_code)]
         hm_df = hm_df[hm_df["card_tpbuz_nm_1"] == hm_biz1]
         hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
         hm_m  = int(hm_month.replace("월", ""))
@@ -1185,7 +1185,7 @@ with tab_lstm:
         if admin_ok:
             lt_admi_code = admin_name_to_code.get(lt_admi_name)
             if lt_admi_code:
-                lt_df = lt_df[lt_df["admi_cty_no"] == lt_admi_code]
+                lt_df = lt_df[lt_df["admi_cty_no"].astype(int) == int(lt_admi_code)]
         lt_df = lt_df[lt_df["card_tpbuz_nm_1"] == lt_biz1]
         lt_df = lt_df[lt_df["card_tpbuz_nm_2"] == lt_biz2]
 
@@ -1319,7 +1319,7 @@ with tab_cluster:
     if cl_district != "전체" and cl_admi_name != "전체" and admin_ok:
         cl_code = admin_name_to_code.get(cl_admi_name)
         if cl_code:
-            cl_df = cl_df[cl_df["admi_cty_no"] == cl_code]
+            cl_df = cl_df[cl_df["admi_cty_no"].astype(int) == int(cl_code)]
     elif cl_district != "전체" and admin_ok:
         cl_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(cl_district, []) if d in admin_name_to_code}
         cl_df = cl_df[cl_df["admi_cty_no"].isin(cl_codes)]
@@ -1483,7 +1483,7 @@ with tab_ai:
                     if ai_district != "전체" and ai_admi_name != "전체" and admin_ok:
                         ai_code = admin_name_to_code.get(ai_admi_name)
                         if ai_code:
-                            filtered = filtered[filtered["admi_cty_no"] == ai_code]
+                            filtered = filtered[filtered["admi_cty_no"].astype(int) == int(ai_code)]
                     elif ai_district != "전체" and admin_ok:
                         ai_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(ai_district, []) if d in admin_name_to_code}
                         filtered = filtered[filtered["admi_cty_no"].isin(ai_codes)]
