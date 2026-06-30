@@ -150,7 +150,7 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
         return False
     os.makedirs(DATASET_DIR, exist_ok=True)
     with st.spinner(f"유동인구 데이터 ({YYYYMM_LABEL.get(yyyymm, yyyymm)}) 다운로드 중..."):
-        gdown.download(id=file_id, output=path, quiet=False)
+        gdown.download(id=file_id, output=path, quiet=False, fuzzy=True)
     return _valid(path)
 
 SEMAS_DIR      = DATASET_DIR
@@ -192,7 +192,7 @@ def ensure_main_zip():
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
     with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
-        gdown.download(id=MAIN_DATA_ZIP_GDRIVE_ID, output=MAIN_DATA_ZIP_PATH, quiet=False)
+        gdown.download(id=MAIN_DATA_ZIP_GDRIVE_ID, output=MAIN_DATA_ZIP_PATH, quiet=False, fuzzy=True)
     return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
@@ -227,7 +227,7 @@ def ensure_semas_data():
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
     with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
-        gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False)
+        gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
     _extract_semas_zip()
 
 
@@ -1955,7 +1955,7 @@ with tab_semas:
                 import gdown
                 os.makedirs(DATASET_DIR, exist_ok=True)
                 with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
-                    gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False)
+                    gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
                 st.rerun()
         else:
             st.warning(
