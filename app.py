@@ -1315,7 +1315,10 @@ with tab_pred:
     if sel_district != "전체" and sel_month != "전체":
         if "month" not in df.columns or sel_month not in df["month"].values:
             city = sel_district if sel_district != "전체" else None
-            ensure_month_in_df(sel_month, city_korean=city)
+            st.info(f"🔄 {sel_district} {sel_month}월 데이터 다운로드 중... (완료 후 자동 갱신)")
+            ok = ensure_month_in_df(sel_month, city_korean=city)
+            if not ok:
+                st.error(f"{sel_month}월 데이터 다운로드 실패. 다시 시도해주세요.")
             st.stop()
 
     if not pred_required:
