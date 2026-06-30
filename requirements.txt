@@ -10,3 +10,4 @@ lightgbm
 torch
 openai
 plotly
+statsmodels
