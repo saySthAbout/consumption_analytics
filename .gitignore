@@ -11,6 +11,7 @@ dataset/flowpop_admi_*.zip
 *.ipynb
 ngrok/
 report.md
+ML PRJ workflow.txt
 dataset/경기도행정기관코드.csv
 dataset/한국수자원공사_*.csv
 
