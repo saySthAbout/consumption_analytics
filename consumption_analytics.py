@@ -725,18 +725,24 @@ with tab_pred:
             )
             ref = df[ref_mask] if ref_mask.sum() >= 10 else df[df["card_tpbuz_nm_2"] == sel_biz2]
 
-            # 실제 데이터에 존재하는 시간대·성별·연령 조합 추출
-            combos = (
-                ref[["hour", "sex", "age"]]
-                .drop_duplicates()
-                .dropna()
+            # 실제 데이터에 존재하는 시간대·성별·연령 조합 + 각 조합의 출현 날 수 계산
+            total_ref_days = ref["ta_ymd"].nunique() if "ta_ymd" in ref.columns and not ref.empty else 1
+            combo_days = (
+                ref.groupby(["hour", "sex", "age"])["ta_ymd"]
+                .nunique()
+                .reset_index()
+                .rename(columns={"ta_ymd": "days"})
+            ) if "ta_ymd" in ref.columns else (
+                ref[["hour", "sex", "age"]].drop_duplicates().assign(days=1)
             )
+            combo_days = combo_days.dropna()
             active_hours = int(ref["hour"].nunique()) if not ref.empty else 10
 
             # (시간대 × 성별 × 연령) 조합별 예측 — 캐시해서 세그먼트 표에 재사용
             pred_cache = {}
-            for _, row in combos.iterrows():
+            for _, row in combo_days.iterrows():
                 h, s, a = int(row["hour"]), row["sex"], int(row["age"])
+                days = int(row["days"])
                 input_row = pd.DataFrame([{
                     "sex": s, "age": a,
                     "day": sel_day, "hour": h,
@@ -750,14 +756,16 @@ with tab_pred:
                     p = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
                 except Exception:
                     p = 0.0
-                pred_cache[(h, s, a)] = p
+                # 출현 빈도(days/total_ref_days)를 가중치로 적용
+                weight = days / max(total_ref_days, 1)
+                pred_cache[(h, s, a)] = (p, weight)
 
-            preds = list(pred_cache.values())
-
-            # 하루 예상 매출 = 각 (시간대×성별×연령) 조합 예측값의 합
-            # (각 조합 예측값 = 해당 시간대에 sel_cnt건 거래 시 예상 매출)
-            daily_pred  = sum(preds)
-            avg_per_grp = float(np.mean(preds)) if preds else 0.0
+            # 하루 예상 매출 = Σ(예측값 × 출현 빈도)
+            # → 해당 조합이 자주 나타날수록 더 많이 반영
+            weighted_preds = [p * w for p, w in pred_cache.values()]
+            preds          = [p for p, _ in pred_cache.values()]
+            daily_pred     = sum(weighted_preds)
+            avg_per_grp    = float(np.mean(preds)) if preds else 0.0
 
             # 비교 기준: 선택 동네 + 업종의 실제 일평균 매출
             area_mask = df["card_tpbuz_nm_2"] == sel_biz2
@@ -809,8 +817,9 @@ with tab_pred:
                 st.text(f"- 예측에 사용된 조합 수: {len(preds)}개 (시간대 × 성별 × 연령)")
                 st.text(f"- 시간대당 거래건수(입력값): {sel_cnt}건")
                 st.text(f"- 하루 활성 시간대: {active_hours}개 (실제 데이터 기준)")
-                st.text(f"- 하루 예상 매출 = 각 조합 예측값 합계 = {fmt(daily_pred)}")
-                st.text(f"  (각 조합: 해당 시간대에 {sel_cnt}건 거래 시 예상 매출을 예측 후 합산)")
+                st.text(f"- 기준 날짜 수: {total_ref_days}일")
+                st.text(f"- 하루 예상 매출 = Σ(조합 예측값 × 출현 빈도) = {fmt(daily_pred)}")
+                st.text(f"  (자주 나타나는 조합일수록 더 많이 반영, 희귀 조합은 적게 반영)")
 
             st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
 
@@ -820,19 +829,22 @@ with tab_pred:
 
             seg_rows = []
             total_ref_cnt = len(ref)
-            for _, combo in combos.iterrows():
+            for _, combo in combo_days.iterrows():
                 h, s, a = int(combo["hour"]), combo["sex"], int(combo["age"])
+                days = int(combo["days"])
+                weight = days / max(total_ref_days, 1)
                 seg_mask  = (ref["hour"] == h) & (ref["sex"] == s) & (ref["age"] == a)
                 seg_cnt   = seg_mask.sum()
                 seg_ratio = seg_cnt / total_ref_cnt * 100 if total_ref_cnt > 0 else 0
-                p = pred_cache.get((h, s, a), 0.0)  # 이미 계산된 예측값 재사용
+                p, _ = pred_cache.get((h, s, a), (0.0, 0.0))
 
                 seg_rows.append({
                     "시간대":            HOUR_MAP.get(h, str(h)),
                     "성별":              "여성" if s == "F" else "남성",
                     "연령대":            AGE_MAP.get(a, f"{a}"),
                     "조합 예측 매출(원)": int(p),
-                    "거래 건수":         sel_cnt,
+                    "출현 빈도":         f"{weight*100:.0f}% ({days}/{total_ref_days}일)",
+                    "가중 예측 매출(원)": int(p * weight),
                     "데이터 비중(%)":    round(seg_ratio, 1),
                 })
 
@@ -843,11 +855,11 @@ with tab_pred:
                     .reset_index(drop=True)
                 )
 
-                # 요약 피벗: 연령대 × 성별 조합 예측 매출 평균
-                st.markdown("**연령대 × 성별 조합 평균 예측 매출 (원)**")
+                # 요약 피벗: 연령대 × 성별 가중 예측 매출 합계
+                st.markdown("**연령대 × 성별 가중 예측 매출 합계 (원)**")
                 pivot = (
-                    seg_df.groupby(["연령대", "성별"])["조합 예측 매출(원)"]
-                    .mean()
+                    seg_df.groupby(["연령대", "성별"])["가중 예측 매출(원)"]
+                    .sum()
                     .round(0)
                     .astype(int)
                     .unstack("성별")
@@ -863,8 +875,9 @@ with tab_pred:
                 st.dataframe(
                     seg_df.style.format({
                         "조합 예측 매출(원)": "{:,}",
+                        "가중 예측 매출(원)": "{:,}",
                         "데이터 비중(%)": "{:.1f}%",
-                    }).background_gradient(subset=["조합 예측 매출(원)"], cmap="Greens"),
+                    }).background_gradient(subset=["가중 예측 매출(원)"], cmap="Greens"),
                     width="stretch",
                     hide_index=True,
                 )
