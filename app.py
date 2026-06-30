@@ -1314,6 +1314,7 @@ with tab_pred:
         if "month" not in df.columns or sel_month not in df["month"].values:
             city = sel_district if sel_district != "전체" else None
             ensure_month_in_df(sel_month, city_korean=city)
+            st.stop()
 
     if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
         try:
@@ -1479,6 +1480,7 @@ with tab_hm:
         # 해당 지역·월 데이터가 없으면 해당 도시만 다운로드
         if "month" not in df.columns or hm_m not in df["month"].values:
             ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
+            st.stop()
         hm_df = hm_df[hm_df["month"] == hm_m]
 
         if hm_df.empty:
@@ -1749,6 +1751,7 @@ with tab_cluster:
         cl_m = int(cl_month.replace("월", ""))
         if "month" not in df.columns or cl_m not in df["month"].values:
             ensure_month_in_df(cl_m, city_korean=cl_district if cl_district != "전체" else None)
+            st.stop()
         cl_df = cl_df[cl_df["month"] == cl_m]
     if cl_days and len(cl_days) < len(all_days):
         day_rev = {v: k for k, v in DAY_MAP.items()}
