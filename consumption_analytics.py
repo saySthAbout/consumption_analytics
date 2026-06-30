@@ -128,31 +128,57 @@ def get_flowpop_zip_path(yyyymm: str) -> str:
         return FLOWPOP_COMBINED_ZIP_PATH
     return os.path.join(DATASET_DIR, f"flowpop_admi_{yyyymm}.zip")
 
+def _hf_download(fname: str, dest_path: str, label: str) -> bool:
+    """HuggingFace Dataset에서 파일 다운로드."""
+    import requests
+    url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{fname}"
+    with st.spinner(f"{label} 다운로드 중..."):
+        try:
+            resp = requests.get(url, stream=True, timeout=300,
+                                headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code == 404:
+                st.error(f"{fname} 파일을 HuggingFace에서 찾을 수 없습니다.")
+                return False
+            resp.raise_for_status()
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            with open(dest_path, "wb") as fp:
+                for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
+                    if chunk:
+                        fp.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"{label} 다운로드 오류: {e}")
+            return False
+
+
 def ensure_flowpop_zip(yyyymm: str) -> bool:
-    """해당 월 flowpop ZIP이 없거나 깨져 있으면 Drive에서 다운로드."""
+    """해당 월 flowpop ZIP이 없거나 깨져 있으면 HuggingFace에서 다운로드."""
     path = get_flowpop_zip_path(yyyymm)
     if os.path.exists(path) and _is_valid_zip(path):
         return True
     if os.path.exists(path):
         os.remove(path)
     if yyyymm in FLOWPOP_COMBINED_YYYYMM:
-        file_id = FLOWPOP_COMBINED_ID
+        fname = "flowpop_admi_202601-202603.zip"
+        label = f"유동인구 {YYYYMM_LABEL.get(yyyymm, yyyymm)}"
+        ok = _hf_download(fname, path, label)
+        return ok and _is_valid_zip(path)
     elif yyyymm in FLOWPOP_MONTHLY_IDS:
+        # 월별 zip은 Google Drive fallback
         file_id = FLOWPOP_MONTHLY_IDS[yyyymm]
-    else:
-        return False
-    label = f"유동인구 {YYYYMM_LABEL.get(yyyymm, yyyymm)}"
-    try:
-        _gdrive_download(file_id, path, label)
-    except Exception as e:
-        st.error(f"유동인구 다운로드 오류: {e}")
-        return False
-    return _is_valid_zip(path)
+        label = f"유동인구 {YYYYMM_LABEL.get(yyyymm, yyyymm)}"
+        try:
+            _gdrive_download(file_id, path, label)
+        except Exception as e:
+            st.error(f"유동인구 다운로드 오류: {e}")
+            return False
+        return _is_valid_zip(path)
+    return False
 
 SEMAS_DIR      = DATASET_DIR
 SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
 SEMAS_ZIP_PATH = os.path.join(DATASET_DIR, SEMAS_ZIP_NAME)
-SEMAS_GDRIVE_FILE_ID = "1Gp573SzYdObGWVi4r6hSJFX0oFumq8qr"
+SEMAS_GDRIVE_FILE_ID = ""  # HuggingFace로 이전
 
 CARD_CSV_DIR = os.path.join(DATASET_DIR, "card_csvs")
 
@@ -402,23 +428,15 @@ def load_month_csv(yyyymm: str):
     return pd.concat(frames, ignore_index=True), enc_used, candidates[0]
 
 def ensure_semas_data():
-    """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
-    # CSV가 이미 하나라도 있으면 스킵
+    """SEMAS zip이 없으면 HuggingFace에서 다운로드 후 압축 해제."""
     if glob.glob(os.path.join(SEMAS_DIR, "semas_store_info_*.csv")):
         return
-    # zip이 있으면 바로 해제
     if os.path.exists(SEMAS_ZIP_PATH):
         _extract_semas_zip()
         return
-    # zip도 없고 Drive ID도 없으면 패스 (탭에서 경고 표시)
-    if not SEMAS_GDRIVE_FILE_ID:
-        return
-    try:
-        _gdrive_download(SEMAS_GDRIVE_FILE_ID, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)")
-    except Exception as e:
-        st.error(f"상권 데이터 다운로드 오류: {e}")
-        return
-    _extract_semas_zip()
+    ok = _hf_download(SEMAS_ZIP_NAME, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)")
+    if ok:
+        _extract_semas_zip()
 
 
 def _extract_semas_zip():
@@ -988,6 +1006,8 @@ def load_cluster_model():
 @st.cache_data
 def load_store_counts():
     path = os.path.join(DATASET_DIR, "semas_store_count_mid.csv")
+    if not os.path.exists(path):
+        _hf_download("semas_store_count_mid.csv", path, "상권 집계 데이터")
     if not os.path.exists(path):
         return None
     return pd.read_csv(path, encoding="utf-8-sig", dtype={"행정동코드": str})
@@ -1614,6 +1634,13 @@ with tab_lstm:
     if not lt_required:
         st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
     else:
+        # df 비어있으면 가장 최근 월 데이터 다운로드
+        if df.empty or "month" not in df.columns:
+            _latest_yyyymm = sorted(AVAILABLE_YYYYMM)[-1]
+            _latest_m = int(_latest_yyyymm[4:])
+            ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
+            st.stop()
+
         # ── 필터 적용 ──
         lt_df = df.copy()
         if admin_ok:
@@ -1749,6 +1776,16 @@ with tab_cluster:
         cl_biz2_opts = ["전체"] + BIZ2_MAP.get(cl_biz1, []) if cl_biz1 != "전체" else ["전체"]
         cl_biz2      = st.selectbox("업종 중분류", cl_biz2_opts, key="cl_biz2")
 
+    # df 비어있고 지역 선택된 경우 최근 월 데이터 다운로드
+    if (cl_district != "전체") and (df.empty or "month" not in df.columns):
+        if cl_month != "전체":
+            _cl_m = int(cl_month.replace("월", ""))
+            ensure_month_in_df(_cl_m, city_korean=cl_district)
+        else:
+            _latest_m = int(sorted(AVAILABLE_YYYYMM)[-1][4:])
+            ensure_month_in_df(_latest_m, city_korean=cl_district)
+        st.stop()
+
     # ── 필터 적용 ──
     cl_df = df.copy()
     if cl_district != "전체" and cl_admi_name != "전체" and admin_ok:
@@ -1799,7 +1836,7 @@ with tab_cluster:
                              labels={"amt": "매출액 (원)"}, color="amt",
                              color_continuous_scale="Blues")
             fig_age.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
-            st.plotly_chart(fig_age, width="stretch")
+            st.plotly_chart(fig_age, use_container_width=True)
 
         # 성별 매출 비중
         with ch2:
@@ -1808,7 +1845,7 @@ with tab_cluster:
             fig_sex = px.pie(sex_grp, names="성별", values="amt", title="성별 매출 비중",
                              color_discrete_map={"여성": "#f472b6", "남성": "#60a5fa"})
             fig_sex.update_layout(height=320)
-            st.plotly_chart(fig_sex, width="stretch")
+            st.plotly_chart(fig_sex, use_container_width=True)
 
         ch3, ch4 = st.columns(2)
 
@@ -1821,7 +1858,7 @@ with tab_cluster:
                               color_continuous_scale="Greens")
             fig_hour.update_layout(showlegend=False, coloraxis_showscale=False, height=320,
                                    xaxis_tickangle=-30)
-            st.plotly_chart(fig_hour, width="stretch")
+            st.plotly_chart(fig_hour, use_container_width=True)
 
         # 요일별 매출
         with ch4:
@@ -1831,7 +1868,7 @@ with tab_cluster:
                              labels={"amt": "매출액 (원)"}, color="amt",
                              color_continuous_scale="Oranges")
             fig_day.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
-            st.plotly_chart(fig_day, width="stretch")
+            st.plotly_chart(fig_day, use_container_width=True)
 
         # 업종 TOP10
         st.subheader("업종별 매출 TOP 10")
@@ -1841,7 +1878,7 @@ with tab_cluster:
         fig_biz = px.bar(top_biz, x="매출액 (원)", y="업종", orientation="h",
                          color="매출액 (원)", color_continuous_scale="Purples")
         fig_biz.update_layout(coloraxis_showscale=False, height=380, yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_biz, width="stretch")
+        st.plotly_chart(fig_biz, use_container_width=True)
 
         # Autoencoder 군집 모델 요약 (있을 때만)
         if os.path.exists(CLUSTER_MODEL_PATH):
@@ -1853,7 +1890,7 @@ with tab_cluster:
                 cluster_names = cluster_data.get("names", [])
                 cluster_centers = cluster_data["centers"]
                 ratios = cluster_data.get("ratios", [])
-                st.dataframe(cluster_stats, width="stretch", hide_index=True)
+                st.dataframe(cluster_stats, use_container_width=True, hide_index=True)
                 viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
                 viz_df["유형"] = cluster_names
                 viz_df["비율(%)"] = ratios
@@ -1861,7 +1898,7 @@ with tab_cluster:
                                    text="유형", size_max=60, height=380,
                                    title="고객 유형 분포 (잠재 공간)")
                 fig_c.update_traces(textposition="top center")
-                st.plotly_chart(fig_c, width="stretch")
+                st.plotly_chart(fig_c, use_container_width=True)
             except Exception as e:
                 st.error(f"군집 모델 로드 오류: {e}")
 
