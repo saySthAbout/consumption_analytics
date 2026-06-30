@@ -459,27 +459,78 @@ def load_sales_data(yyyymm: str):
     return raw, enc, path
 
 
-def ensure_month_in_df(month_int: int) -> bool:
-    """df에 해당 월 데이터가 없으면 다운로드 후 merge. True=데이터 있음."""
-    df_cur = st.session_state.get("df")
-    if df_cur is not None and month_int in df_cur["month"].values:
+# 한글 시/구명 → CSV 파일명 영문 접미어 매핑
+CITY_KO_TO_EN: dict[str, str] = {
+    "안산시": "ansan",    "안양시": "anyang",     "김포시": "gimpo",
+    "광명시": "gwangmyeong", "하남시": "hanam",   "화성시": "hwaseong",
+    "남양주시": "namyangju", "파주시": "paju",    "포천시": "pocheon",
+    "성남시": "seongnam", "시흥시": "siheung",   "수원시": "suwon",
+    "의정부시": "uijeongbu", "의왕시": "uiwang", "여주시": "weju",
+    "용인시": "yongin",   "원천시": "woncheon",
+}
+
+
+def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
+    """선택 도시의 해당 월 CSV 파일만 다운로드 (없으면 전체 시도)."""
+    os.makedirs(CARD_CSV_DIR, exist_ok=True)
+    city_en = CITY_KO_TO_EN.get(city_korean)
+
+    # 이미 해당 도시·월 파일 있으면 즉시 반환
+    if city_en:
+        found = glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv"))
+        if found:
+            return True
+    elif glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
         return True
-    # yyyymm 계산: 로드된 연도 기준 (예: 202603 → 년=2026)
-    base = st.session_state.get("loaded_yyyymm", "202603")
-    year = int(base[:4])
+
+    existing_names = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
+    pending = [fid for fid in CARD_FILE_IDS
+               if not any(fid[:10] in n for n in existing_names)]
+
+    label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}" if city_en else YYYYMM_LABEL.get(yyyymm, yyyymm)
+    target = f"{yyyymm}_{city_en}" if city_en else yyyymm
+
+    with st.spinner(f"{label} 데이터 다운로드 중..."):
+        for fid in pending:
+            saved = _download_gdrive_csv(fid, CARD_CSV_DIR)
+            if saved and target in os.path.basename(saved):
+                return True  # 원하는 파일 찾음 → 즉시 종료
+
+    # city_en 매핑이 없거나 못 찾은 경우 전체 월 확인
+    return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
+
+
+def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
+    """df에 해당 월·도시 데이터가 없으면 다운로드 후 merge."""
+    df_cur = st.session_state.get("df")
+    base   = st.session_state.get("loaded_yyyymm", "202603")
+    year   = int(base[:4])
     yyyymm = f"{year}{month_int:02d}"
-    csv_ok = ensure_month_csvs(yyyymm)
+
+    # 이미 해당 월 데이터 있는지 확인
+    if df_cur is not None and month_int in df_cur["month"].values:
+        if city_korean is None:
+            return True
+        city_en = CITY_KO_TO_EN.get(city_korean)
+        if city_en is None:
+            return True
+        # 해당 도시 데이터도 있는지 확인 (admi_cty_no 기반은 어려우므로 파일 존재로 확인)
+        if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv")):
+            return True
+
+    # 도시 지정이 있으면 해당 도시 파일만 다운로드
+    if city_korean:
+        csv_ok = ensure_city_month_csv(city_korean, yyyymm)
+    else:
+        csv_ok = ensure_month_csvs(yyyymm)
     if not csv_ok:
         return False
+
     try:
         with st.spinner(f"{month_int}월 데이터 로드 중..."):
             raw_new, _, _ = load_sales_data(yyyymm)
             df_new = preprocess_data(raw_new)
-        if df_cur is not None:
-            merged = pd.concat([df_cur, df_new], ignore_index=True)
-            merged = merged.drop_duplicates()
-        else:
-            merged = df_new
+        merged = pd.concat([df_cur, df_new], ignore_index=True).drop_duplicates() if df_cur is not None else df_new
         st.session_state["df"] = merged
         st.rerun()
     except Exception as e:
@@ -1234,7 +1285,8 @@ with tab_pred:
 
     if pred_required and sel_month != "전체":
         if sel_month not in df["month"].values:
-            ensure_month_in_df(sel_month)
+            city = sel_district if sel_district != "전체" else None
+            ensure_month_in_df(sel_month, city_korean=city)
 
     if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
         try:
