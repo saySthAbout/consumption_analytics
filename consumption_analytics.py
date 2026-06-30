@@ -179,38 +179,41 @@ def _is_valid_zip(path):
         return False
 
 
-def _gdrive_download(file_id: str, output_path: str, label: str = "파일"):
-    """requests로 Google Drive 대용량 파일 직접 다운로드 (바이러스 확인 우회)."""
+def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
+                     expected_mb: float = 500):
+    """Google Drive 대용량 파일 다운로드 (최신 usercontent 도메인 사용)."""
     import requests
     session = requests.Session()
-    base_url = "https://drive.google.com/uc"
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-    # 1차 요청 → 확인 토큰 추출
-    resp = session.get(base_url, params={"export": "download", "id": file_id}, stream=True)
-    confirm = next(
-        (v for k, v in resp.cookies.items() if k.startswith("download_warning")),
-        None,
+    # 최신 Google Drive 다운로드 URL (바이러스 경고 우회)
+    url = (
+        f"https://drive.usercontent.google.com/download"
+        f"?id={file_id}&export=download&authuser=0&confirm=t"
     )
-    if confirm:
-        resp = session.get(
-            base_url,
-            params={"export": "download", "id": file_id, "confirm": confirm},
-            stream=True,
-        )
+    resp = session.get(url, stream=True, timeout=300)
+    resp.raise_for_status()
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     chunk_size = 4 * 1024 * 1024  # 4MB
     downloaded = 0
-    progress = st.progress(0, text=f"{label} 다운로드 중...")
+    total_bytes = expected_mb * 1024 * 1024
+    progress = st.progress(0.0, text=f"{label} 다운로드 중...")
     with open(output_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=chunk_size):
             if chunk:
                 f.write(chunk)
                 downloaded += len(chunk)
                 mb = downloaded / (1024 * 1024)
-                progress.progress(min(downloaded / (1200 * 1024 * 1024), 1.0),
-                                   text=f"{label} 다운로드 중... {mb:.0f} MB")
+                progress.progress(
+                    min(downloaded / total_bytes, 1.0),
+                    text=f"{label} 다운로드 중... {mb:.0f} MB",
+                )
     progress.empty()
+    # 다운로드된 파일이 너무 작으면 HTML 오류 페이지로 판단
+    if downloaded < 1024 * 100:  # 100KB 미만
+        os.remove(output_path)
+        raise ValueError(f"다운로드 크기 이상 ({downloaded} bytes) — Drive 접근 실패")
 
 
 def ensure_main_zip():
