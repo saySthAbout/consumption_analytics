@@ -689,21 +689,24 @@ DISTRICT_MAP = {
     "41111": "수원시 장안구", "41113": "수원시 권선구",
     "41115": "수원시 팔달구", "41117": "수원시 영통구",
     "41131": "성남시 수정구", "41133": "성남시 중원구", "41135": "성남시 분당구",
-    "41150": "안양시 만안구",  # 41150 → 만안구 (41171도 안양시)
+    "41150": "안양시 만안구",
     "41171": "안양시 만안구", "41173": "안양시 동안구",
     "41210": "부천시",
-    "41271": "광명시",
-    "41273": "안산시 단원구",
+    "41270": "광명시", "41271": "광명시",
+    "41273": "안산시 단원구", "41275": "안산시 상록구", "41290": "안산시",
     "41360": "남양주시",
     "41390": "시흥시",
     "41450": "하남시",
     "41461": "용인시 처인구", "41463": "용인시 기흥구", "41465": "용인시 수지구",
     "41480": "과천시",
+    "41500": "이천시",
     "41570": "의정부시",
-    "41591": "화성시", "41593": "화성시", "41595": "화성시", "41597": "화성시",
+    "41590": "화성시", "41591": "화성시", "41593": "화성시", "41595": "화성시", "41597": "화성시",
+    "41630": "포천시",
     "41650": "파주시",
     "41670": "김포시",
     "41800": "여주시",
+    "41820": "연천군",
 }
 
 AGE_COLS_M = [f"M_{a}_CNT" for a in [10,15,20,25,30,35,40,45,50,55,60,65,70]]
@@ -1522,6 +1525,12 @@ with tab_hm:
     if not hm_required:
         st.info("📌 지역(시/구), 동네, 월, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
     else:
+        # ── 먼저 데이터 다운로드 확인 (필터보다 앞에) ──
+        hm_m = int(hm_month.replace("월", ""))
+        if "month" not in df.columns or hm_m not in df["month"].values:
+            ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
+            st.stop()
+
         # ── 필터 적용 ──
         hm_df = df.copy()
         if admin_ok:
@@ -1530,11 +1539,6 @@ with tab_hm:
                 hm_df = hm_df[hm_df["admi_cty_no"].astype(int) == int(hm_code)]
         hm_df = hm_df[hm_df["card_tpbuz_nm_1"] == hm_biz1]
         hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
-        hm_m  = int(hm_month.replace("월", ""))
-        # 해당 지역·월 데이터가 없으면 해당 도시만 다운로드
-        if "month" not in df.columns or hm_m not in df["month"].values:
-            ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
-            st.stop()
         hm_df = hm_df[hm_df["month"] == hm_m]
 
         if hm_df.empty:
@@ -1808,15 +1812,17 @@ with tab_cluster:
         cl_biz2_opts = ["전체"] + BIZ2_MAP.get(cl_biz1, []) if cl_biz1 != "전체" else ["전체"]
         cl_biz2      = st.selectbox("업종 중분류", cl_biz2_opts, key="cl_biz2")
 
-    # df 비어있고 지역 선택된 경우 최근 월 데이터 다운로드
-    if (cl_district != "전체") and (df.empty or "month" not in df.columns):
+    # 지역 선택 시 필요한 월 데이터 확인 (필터보다 앞에)
+    if cl_district != "전체":
         if cl_month != "전체":
             _cl_m = int(cl_month.replace("월", ""))
-            ensure_month_in_df(_cl_m, city_korean=cl_district)
-        else:
+            if "month" not in df.columns or _cl_m not in df["month"].values:
+                ensure_month_in_df(_cl_m, city_korean=cl_district)
+                st.stop()
+        elif df.empty or "month" not in df.columns:
             _latest_m = int(sorted(AVAILABLE_YYYYMM)[-1][4:])
             ensure_month_in_df(_latest_m, city_korean=cl_district)
-        st.stop()
+            st.stop()
 
     # ── 필터 적용 ──
     cl_df = df.copy()
