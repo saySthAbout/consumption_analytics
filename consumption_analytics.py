@@ -814,6 +814,7 @@ ensure_sales_data()
 try:
     raw_df, sales_enc, sales_path = load_sales_data()
     df = preprocess_data(raw_df)
+    available_months = sorted(df["month"].dropna().unique().astype(int).tolist())
 except Exception as e:
     st.error(f"매출 데이터 로드 실패: {e}")
     st.info("dataset 폴더 안의 매출 CSV 파일 위치를 확인해주세요.")
@@ -868,7 +869,7 @@ with tab_pred:
             sel_district = sel_admi_name = "전체"
             sel_admi = 0
 
-        sel_month     = st.selectbox("월", ["전체"] + list(range(1, 13)),
+        sel_month     = st.selectbox("월", ["전체"] + available_months,
                                      format_func=lambda x: f"{x}월" if x != "전체" else "전체",
                                      key="pred_month")
         sel_day_label = st.selectbox("요일", ["전체"] + list(DAY_MAP.values()), key="pred_day")
@@ -1037,7 +1038,7 @@ with tab_hm:
             hm_admi_name = st.selectbox("동네 선택", hm_dong_opts, key="hm_dong")
         else:
             hm_district = hm_admi_name = "전체"
-        hm_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in range(1, 13)], key="hm_month")
+        hm_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in available_months], key="hm_month")
     with hm2:
         hm_biz1      = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="hm_biz1")
         hm_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == hm_biz1]["card_tpbuz_nm_2"].dropna().unique()) if hm_biz1 != "전체" else ["전체"]
@@ -1306,7 +1307,7 @@ with tab_cluster:
             cl_admi_name = st.selectbox("동네 선택", cl_dong_opts, key="cl_dong")
         else:
             cl_district = cl_admi_name = "전체"
-        cl_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in range(1, 13)], key="cl_month")
+        cl_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in available_months], key="cl_month")
         all_days  = list(DAY_MAP.values())
         cl_days   = st.multiselect("요일 (전체 선택 = 모든 요일)", all_days, default=all_days, key="cl_days")
     with cl2:
