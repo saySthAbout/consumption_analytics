@@ -1487,7 +1487,22 @@ with tab_hm:
         hm_df = hm_df[hm_df["month"] == hm_m]
 
         if hm_df.empty:
-            st.warning("선택 조건에 해당하는 데이터가 없습니다.")
+            # 어느 필터에서 빈 결과가 됐는지 진단
+            _diag = df.copy()
+            _msgs = []
+            if admin_ok and admin_name_to_code.get(hm_admi_name):
+                _diag = _diag[_diag["admi_cty_no"].astype(int) == int(admin_name_to_code[hm_admi_name])]
+                _msgs.append(f"{hm_admi_name}: {len(_diag):,}건")
+            if "card_tpbuz_nm_1" in _diag.columns:
+                _diag = _diag[_diag["card_tpbuz_nm_1"] == hm_biz1]
+                _msgs.append(f"{hm_biz1}: {len(_diag):,}건")
+            if "card_tpbuz_nm_2" in _diag.columns:
+                _diag = _diag[_diag["card_tpbuz_nm_2"] == hm_biz2]
+                _msgs.append(f"{hm_biz2}: {len(_diag):,}건")
+            if "month" in _diag.columns:
+                _diag = _diag[_diag["month"] == hm_m]
+                _msgs.append(f"{hm_m}월: {len(_diag):,}건")
+            st.warning("선택 조건에 해당하는 데이터가 없습니다.\n\n" + " → ".join(_msgs))
         else:
             st.caption(f"분석 데이터: {len(hm_df):,}건")
 
