@@ -154,9 +154,8 @@ SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
 SEMAS_ZIP_PATH = os.path.join(DATASET_DIR, SEMAS_ZIP_NAME)
 SEMAS_GDRIVE_FILE_ID = "1Gp573SzYdObGWVi4r6hSJFX0oFumq8qr"
 
-MAIN_DATA_ZIP_GDRIVE_ID = "1z1Bz_0nSP68FHZSvzVygDumSpgwDov-Y"
-MAIN_DATA_ZIP_NAME      = "tbsh_gyeonggi_card_data_day_202504_202603.zip"
-MAIN_DATA_ZIP_PATH      = os.path.join(DATASET_DIR, MAIN_DATA_ZIP_NAME)
+CARD_CSV_FOLDER_ID = "140ZPjvmD6aa2c5r7Tx5ZDLc_enBzCDOX"
+CARD_CSV_DIR       = os.path.join(DATASET_DIR, "card_csvs")
 
 # 2025-04 ~ 2026-03 (12개월)
 AVAILABLE_YYYYMM = [
@@ -220,67 +219,76 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
 
 
 
-def ensure_main_zip():
-    """ZIP이 없거나 깨져 있으면 Google Drive에서 다운로드."""
-    if os.path.exists(MAIN_DATA_ZIP_PATH) and _is_valid_zip(MAIN_DATA_ZIP_PATH):
+def _gdrive_folder_file_ids(folder_id: str) -> dict:
+    """Drive 공개 폴더에서 {파일명: file_id} 매핑 반환 (gdown 내부 이용)."""
+    import gdown, re
+    import requests as _req
+    sess = _req.Session()
+    sess.headers["User-Agent"] = "Mozilla/5.0"
+    url = f"https://drive.google.com/drive/folders/{folder_id}"
+    html = sess.get(url, timeout=30).text
+    # gdown 4.7.3 방식: JSON 내 [name, mime, id] 패턴 추출
+    entries = re.findall(r'\["([^"]+\.csv)","[^"]*","([A-Za-z0-9_\-]{25,})"', html)
+    return {name: fid for name, fid in entries}
+
+
+def _ensure_card_csv_dir():
+    os.makedirs(CARD_CSV_DIR, exist_ok=True)
+
+
+def ensure_month_csvs(yyyymm: str) -> bool:
+    """해당 월 CSV가 없으면 Drive 폴더에서 다운로드."""
+    _ensure_card_csv_dir()
+    existing = glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv"))
+    if existing:
         return True
-    if os.path.exists(MAIN_DATA_ZIP_PATH):
-        os.remove(MAIN_DATA_ZIP_PATH)
-    try:
-        _gdrive_download(MAIN_DATA_ZIP_GDRIVE_ID, MAIN_DATA_ZIP_PATH, "카드 데이터 ZIP (약 1GB)")
-    except Exception as e:
-        st.error(f"다운로드 오류: {e}")
+
+    # 폴더 파일 목록 캐시 (session_state)
+    if "card_folder_map" not in st.session_state:
+        with st.spinner("Drive 폴더 파일 목록 조회 중..."):
+            st.session_state["card_folder_map"] = _gdrive_folder_file_ids(CARD_CSV_FOLDER_ID)
+    folder_map = st.session_state["card_folder_map"]
+
+    targets = {name: fid for name, fid in folder_map.items() if yyyymm in name}
+    if not targets:
+        st.error(f"Drive 폴더에 {yyyymm} 파일 없음. 폴더 목록: {list(folder_map.keys())[:5]}")
         return False
-    return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
-
-def _list_zip_members(zip_path: str) -> list:
-    """시스템 unzip으로 ZIP 내 파일 목록 반환 (압축 방식 무관)."""
-    import subprocess
-    proc = subprocess.run(
-        ["unzip", "-Z1", zip_path], capture_output=True, text=True
-    )
-    if proc.returncode not in (0, 1):  # 1 = warning but OK
-        raise RuntimeError(f"unzip -Z1 실패: {proc.stderr[:200]}")
-    return [l.strip() for l in proc.stdout.splitlines() if l.strip().endswith(".csv")]
-
-
-def _read_member_via_unzip(zip_path: str, member: str) -> bytes:
-    """시스템 unzip -p 로 ZIP 멤버를 메모리로 추출."""
-    import subprocess
-    proc = subprocess.run(
-        ["unzip", "-p", zip_path, member], capture_output=True, timeout=120
-    )
-    if proc.returncode not in (0, 1):
-        raise RuntimeError(f"unzip -p 실패 ({member}): {proc.stderr[:200]}")
-    return proc.stdout
+    label = YYYYMM_LABEL.get(yyyymm, yyyymm)
+    errors = []
+    with st.spinner(f"{label} 카드 데이터 다운로드 중... ({len(targets)}개 파일)"):
+        for name, fid in sorted(targets.items()):
+            out = os.path.join(CARD_CSV_DIR, name)
+            if os.path.exists(out) and os.path.getsize(out) > 1024:
+                continue
+            try:
+                _gdrive_download(fid, out, name, expected_mb=10)
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+    if errors:
+        st.warning("일부 파일 다운로드 실패:\n" + "\n".join(errors[:5]))
+    return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
 
 
 def load_month_csv(yyyymm: str):
-    """ZIP에서 해당 월 모든 도시 CSV를 합쳐 DataFrame으로 반환."""
-    encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
-    all_members = _list_zip_members(MAIN_DATA_ZIP_PATH)
-    candidates = sorted(n for n in all_members if yyyymm in n)
+    """로컬 CSV 디렉터리에서 해당 월 모든 도시 파일을 합쳐 반환."""
+    candidates = sorted(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
     if not candidates:
-        raise FileNotFoundError(
-            f"ZIP 안에 {yyyymm} 해당 파일 없음. 예시: {all_members[:5]}"
-        )
-    frames = []
-    enc_used = "utf-8-sig"
-    for name in candidates:
-        data = _read_member_via_unzip(MAIN_DATA_ZIP_PATH, name)
+        raise FileNotFoundError(f"{CARD_CSV_DIR} 에 {yyyymm} CSV 없음")
+    encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
+    frames, enc_used = [], "utf-8-sig"
+    for path in candidates:
         for enc in encodings:
             try:
-                df = pd.read_csv(io.BytesIO(data), encoding=enc, dtype=_SALES_DTYPES)
+                df = pd.read_csv(path, encoding=enc, dtype=_SALES_DTYPES)
                 enc_used = enc
                 frames.append(df)
                 break
             except Exception:
                 continue
         else:
-            raise ValueError(f"{name} 읽기 실패")
-    raw = pd.concat(frames, ignore_index=True)
-    return raw, enc_used, candidates[0]
+            raise ValueError(f"{os.path.basename(path)} 읽기 실패")
+    return pd.concat(frames, ignore_index=True), enc_used, candidates[0]
 
 def ensure_semas_data():
     """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
@@ -980,38 +988,9 @@ if "df" not in st.session_state:
         st.markdown("<br>", unsafe_allow_html=True)
         load_btn = st.button("📥 데이터 로드", type="primary", key="load_month_btn")
 
-    # 네트워크 디버그 버튼
-    if st.button("🔍 네트워크 연결 테스트", key="net_test_btn"):
-        import requests, subprocess, shutil
-        st.write("**외부 URL 연결 테스트**")
-        test_url = "https://drive.usercontent.google.com/download?id=1xVViEFEElWSYcQQp4R3qOi8yChzmvTuR&export=download&confirm=t"
-        try:
-            r = requests.head(test_url, timeout=15, allow_redirects=True)
-            st.write(f"- HEAD 상태코드: {r.status_code}")
-            st.write(f"- Content-Type: {r.headers.get('Content-Type')}")
-            st.write(f"- Content-Length: {r.headers.get('Content-Length', '없음')}")
-            st.write(f"- Transfer-Encoding: {r.headers.get('Transfer-Encoding', '없음')}")
-        except Exception as e:
-            st.write(f"- HEAD 오류: {e}")
-        # wget 존재 여부
-        st.write(f"- wget: {shutil.which('wget')}")
-        st.write(f"- curl: {shutil.which('curl')}")
-        # curl verbose test (첫 500자만)
-        curl_bin = shutil.which("curl")
-        if curl_bin:
-            proc = subprocess.run(
-                [curl_bin, "-v", "--silent", "--max-time", "10",
-                 "-o", "/dev/null", test_url],
-                capture_output=True, text=True, timeout=15,
-            )
-            st.code(proc.stderr[:800], language="text")
-
     if load_btn:
-        zip_ok = ensure_main_zip()
-        if not zip_ok:
-            st.error("데이터 ZIP 다운로드 실패. Google Drive 공유 설정 또는 네트워크를 확인해주세요.")
-            st.info(f"Drive 파일 ID: `{MAIN_DATA_ZIP_GDRIVE_ID}` — 링크가 '링크가 있는 모든 사용자'로 공유되어 있는지 확인하세요.")
-        else:
+        csv_ok = ensure_month_csvs(selected_yyyymm)
+        if csv_ok:
             try:
                 with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
                     raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
@@ -1040,8 +1019,8 @@ selected_yyyymm = st.sidebar.selectbox(
     key="selected_yyyymm",
 )
 if st.sidebar.button("🔄 변경", key="change_month_btn") and selected_yyyymm != loaded_yyyymm:
-    zip_ok = ensure_main_zip()
-    if zip_ok:
+    csv_ok = ensure_month_csvs(selected_yyyymm)
+    if csv_ok:
         try:
             with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
                 raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
