@@ -112,25 +112,50 @@ SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
 SEMAS_ZIP_PATH = os.path.join(DATASET_DIR, SEMAS_ZIP_NAME)
 SEMAS_GDRIVE_FILE_ID = "1Gp573SzYdObGWVi4r6hSJFX0oFumq8qr"
 
-GDRIVE_FILE_ID   = "1JnLZDcT0OY2bAQLcinH_eSXpzg9hS7RY"
-GDRIVE_FILE_NAME = "tbsh_gyeonggi_day_202602_hwaseungsi.csv"
+MAIN_DATA_ZIP_GDRIVE_ID = "1xVViEFEElWSYcQQp4R3qOi8yChzmvTuR"
+MAIN_DATA_ZIP_NAME      = "tbsh_gyeonggi_card_data_day_202504_202603.zip"
+MAIN_DATA_ZIP_PATH      = os.path.join(DATASET_DIR, MAIN_DATA_ZIP_NAME)
 
-DATA_PATHS = [
-    os.path.join(DATASET_DIR, GDRIVE_FILE_NAME),
-    os.path.join(BASE_DIR,    GDRIVE_FILE_NAME),
+# 2025-04 ~ 2026-03 (12개월)
+AVAILABLE_YYYYMM = [
+    "202504","202505","202506","202507","202508","202509",
+    "202510","202511","202512","202601","202602","202603",
 ]
+YYYYMM_LABEL = {
+    "202504":"2025년 4월","202505":"2025년 5월","202506":"2025년 6월",
+    "202507":"2025년 7월","202508":"2025년 8월","202509":"2025년 9월",
+    "202510":"2025년 10월","202511":"2025년 11월","202512":"2025년 12월",
+    "202601":"2026년 1월","202602":"2026년 2월","202603":"2026년 3월",
+}
 
 
-def ensure_sales_data():
-    """CSV가 없으면 Google Drive에서 자동 다운로드."""
-    if any(os.path.exists(p) for p in DATA_PATHS):
-        return
+def ensure_main_zip():
+    """ZIP이 없으면 Google Drive에서 다운로드."""
+    if os.path.exists(MAIN_DATA_ZIP_PATH):
+        return True
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
-    dest = DATA_PATHS[0]
-    url  = f"https://drive.google.com/uc?id={GDRIVE_FILE_ID}"
-    with st.spinner("매출 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회)"):
-        gdown.download(url, dest, quiet=False)
+    url = f"https://drive.google.com/uc?id={MAIN_DATA_ZIP_GDRIVE_ID}"
+    with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
+        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False)
+    return os.path.exists(MAIN_DATA_ZIP_PATH)
+
+
+def load_month_csv(yyyymm: str):
+    """ZIP에서 해당 월 CSV만 추출해 DataFrame으로 반환."""
+    with zipfile.ZipFile(MAIN_DATA_ZIP_PATH, "r") as zf:
+        candidates = [n for n in zf.namelist() if yyyymm in n and n.endswith(".csv")]
+        if not candidates:
+            raise FileNotFoundError(f"ZIP 안에 {yyyymm} 해당 파일 없음. 목록: {zf.namelist()}")
+        name = candidates[0]
+        encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
+        for enc in encodings:
+            try:
+                raw = pd.read_csv(io.BytesIO(zf.read(name)), encoding=enc, dtype=_SALES_DTYPES)
+                return raw, enc, name
+            except Exception:
+                continue
+        raise ValueError(f"{name} 읽기 실패")
 
 def ensure_semas_data():
     """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
@@ -215,8 +240,9 @@ def read_csv_auto(path_list):
 
 
 @st.cache_data
-def load_sales_data():
-    return read_csv_auto(DATA_PATHS)
+def load_sales_data(yyyymm: str):
+    raw, enc, path = load_month_csv(yyyymm)
+    return raw, enc, path
 
 
 def find_admin_path():
@@ -809,16 +835,38 @@ use_log_target  = True
 remove_outliers = True
 model_name      = "LightGBM"
 
-# ── 매출 데이터 로드 ────────────────────────────────────
-ensure_sales_data()
-try:
-    raw_df, sales_enc, sales_path = load_sales_data()
-    df = preprocess_data(raw_df)
-    available_months = sorted(df["month"].dropna().unique().astype(int).tolist())
-except Exception as e:
-    st.error(f"매출 데이터 로드 실패: {e}")
-    st.info("dataset 폴더 안의 매출 CSV 파일 위치를 확인해주세요.")
-    st.stop()
+# ── 매출 데이터 로드 (월 선택 후 사이드바 버튼으로 로드) ──
+st.sidebar.markdown("---")
+st.sidebar.markdown("**📅 데이터 월 선택**")
+selected_yyyymm = st.sidebar.selectbox(
+    "조회 월",
+    AVAILABLE_YYYYMM,
+    format_func=lambda x: YYYYMM_LABEL[x],
+    index=len(AVAILABLE_YYYYMM) - 1,  # 기본: 최신월(202603)
+    key="selected_yyyymm",
+)
+load_btn = st.sidebar.button("📥 해당 월 데이터 로드", type="primary", key="load_month_btn")
+
+if load_btn or "df" not in st.session_state or st.session_state.get("loaded_yyyymm") != selected_yyyymm:
+    zip_ok = ensure_main_zip()
+    if not zip_ok:
+        st.error("데이터 ZIP 다운로드 실패. 네트워크를 확인해주세요.")
+        st.stop()
+    try:
+        with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
+            raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
+            st.session_state["df"]            = preprocess_data(raw_df)
+            st.session_state["loaded_yyyymm"] = selected_yyyymm
+            st.session_state["sales_enc"]     = sales_enc
+            st.session_state["sales_path"]    = sales_path
+    except Exception as e:
+        st.error(f"매출 데이터 로드 실패: {e}")
+        st.stop()
+
+df         = st.session_state["df"]
+sales_enc  = st.session_state.get("sales_enc", "-")
+sales_path = st.session_state.get("sales_path", "-")
+st.sidebar.success(f"로드됨: {YYYYMM_LABEL[st.session_state['loaded_yyyymm']]}")
 
 # ── 행정동 코드 로드 (없어도 앱 계속 동작) ─────────────
 try:
