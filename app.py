@@ -577,9 +577,11 @@ def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
 def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
     """df에 해당 월·도시 데이터가 없으면 다운로드 후 merge."""
     df_cur = st.session_state.get("df")
-    base   = st.session_state.get("loaded_yyyymm", "202603")
-    year   = int(base[:4])
-    yyyymm = f"{year}{month_int:02d}"
+    # AVAILABLE_YYYYMM에서 해당 month_int와 일치하는 yyyymm 찾기
+    yyyymm = next((m for m in AVAILABLE_YYYYMM if int(m[4:]) == month_int), None)
+    if yyyymm is None:
+        st.warning(f"{month_int}월 데이터는 제공되지 않습니다.")
+        return False
 
     # 이미 해당 월 데이터 있는지 확인
     if df_cur is not None and "month" in df_cur.columns and month_int in df_cur["month"].values:
@@ -1268,10 +1270,12 @@ with tab_pred:
             sel_district = sel_admi_name = "전체"
             sel_admi = 0
 
-        _def_month = int(loaded_yyyymm[-2:])
-        sel_month     = st.selectbox("월", ["전체"] + list(range(1, 13)),
+        _avail_months = sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+        _def_month_val = int(loaded_yyyymm[-2:])
+        _def_month_idx = (_avail_months.index(_def_month_val) + 1) if _def_month_val in _avail_months else 0
+        sel_month     = st.selectbox("월", ["전체"] + _avail_months,
                                      format_func=lambda x: f"{x}월" if x != "전체" else "전체",
-                                     index=_def_month,  # 1→index1=1월, 기본값=로드된 월
+                                     index=_def_month_idx,
                                      key="pred_month")
         sel_day_label = st.selectbox("요일", ["전체"] + list(DAY_MAP.values()), key="pred_day")
         sel_day       = {v: k for k, v in DAY_MAP.items()}.get(sel_day_label)
@@ -1447,7 +1451,7 @@ with tab_hm:
             hm_admi_name = st.selectbox("동네 선택", hm_dong_opts, key="hm_dong")
         else:
             hm_district = hm_admi_name = "전체"
-        _hm_month_opts = ["전체"] + [f"{m}월" for m in range(1, 13)]
+        _hm_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
         hm_month = st.selectbox("월", _hm_month_opts, key="hm_month",
                                 index=int(loaded_yyyymm[-2:]))
     with hm2:
@@ -1724,7 +1728,7 @@ with tab_cluster:
             cl_admi_name = st.selectbox("동네 선택", cl_dong_opts, key="cl_dong")
         else:
             cl_district = cl_admi_name = "전체"
-        _cl_month_opts = ["전체"] + [f"{m}월" for m in range(1, 13)]
+        _cl_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
         cl_month = st.selectbox("월", _cl_month_opts, key="cl_month",
                                 index=int(loaded_yyyymm[-2:]))
         all_days  = list(DAY_MAP.values())
