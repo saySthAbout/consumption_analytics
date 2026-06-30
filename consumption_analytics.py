@@ -837,7 +837,7 @@ except Exception:
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
 tab_pred, tab_hm, tab_lstm, tab_cluster, tab_ai, tab_fp, tab_semas, tab_ov = st.tabs([
-    "💰 매출 예측",
+    "💰 1인당 소비 예측",
     "⏰ 시간대·요일 분석",
     "📈 시계열 예측",
     "👥 고객 군집 분석",
@@ -853,196 +853,178 @@ _mi = joblib.load(MODEL_INFO_PATH) if os.path.exists(MODEL_INFO_PATH) else {}
 # 💰 매출 예측 (탭 1 - 사장님 하루 단위 예측)
 # =====================================================
 with tab_pred:
-    st.subheader("오늘 하루 예상 매출은 얼마일까요?")
-    st.caption("월·요일·동네·업종을 선택하면 하루 예상 매출을 알려드립니다.")
+    st.subheader("1인당 소비금액 예측")
+    st.caption("조건을 모두 선택한 뒤 버튼을 누르면 해당 고객 유형의 1인당 예상 소비금액을 알려드립니다.")
 
     p1, p2 = st.columns(2)
 
     with p1:
-        sel_month = st.selectbox("월", list(range(1, 13)), index=0,
-                                 format_func=lambda x: f"{x}월")
-        sel_day_label = st.selectbox("요일", list(DAY_MAP.values()), index=4)
-        sel_day = {v: k for k, v in DAY_MAP.items()}[sel_day_label]
-
-    with p2:
         if admin_ok:
-            sel_district  = st.selectbox("지역 (시/구)", admin_district_list)
-            dong_opts     = admin_district_to_dongs.get(sel_district, [])
-            sel_admi_name = st.selectbox("동네 선택", dong_opts)
+            sel_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="pred_dist")
+            dong_opts     = admin_district_to_dongs.get(sel_district, []) if sel_district != "전체" else []
+            sel_admi_name = st.selectbox("동네 선택", ["전체"] + dong_opts, key="pred_dong")
             sel_admi      = admin_name_to_code.get(sel_admi_name, 0)
         else:
-            st.warning("⚠️ 행정동 코드 파일 없음")
-            fallback_opts = sorted(df["admi_cty_no"].dropna().astype(str).unique().tolist())
-            sel_admi_name = st.selectbox("동네", fallback_opts)
-            sel_admi      = int(sel_admi_name)
+            sel_district = sel_admi_name = "전체"
+            sel_admi = 0
 
-        sel_biz1  = st.selectbox("업종 대분류", sorted(df["card_tpbuz_nm_1"].dropna().unique()))
-        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"].dropna().unique())
-        if not biz2_opts:
-            st.warning("선택한 대분류에 해당하는 중분류가 없습니다.")
-            sel_biz2 = None
-        else:
-            sel_biz2 = st.selectbox("업종 중분류", biz2_opts)
+        sel_month     = st.selectbox("월", ["전체"] + list(range(1, 13)),
+                                     format_func=lambda x: f"{x}월" if x != "전체" else "전체",
+                                     key="pred_month")
+        sel_day_label = st.selectbox("요일", ["전체"] + list(DAY_MAP.values()), key="pred_day")
+        sel_day       = {v: k for k, v in DAY_MAP.items()}.get(sel_day_label)
 
-        avg_cnt = int(round(
-            df[df["card_tpbuz_nm_2"] == sel_biz2]["cnt"].mean()
-        )) if sel_biz2 and "cnt" in df.columns else 10
-        sel_cnt = st.number_input(
-            f"시간대당 예상 거래 건수  ※ {sel_biz2} 시간대 평균: {avg_cnt}건",
-            min_value=1, value=avg_cnt, step=1
-        )
+    with p2:
+        sel_biz1  = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="pred_biz1")
+        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"].dropna().unique()) if sel_biz1 != "전체" else []
+        sel_biz2  = st.selectbox("업종 중분류", ["전체"] + biz2_opts, key="pred_biz2")
 
-    if sel_biz2 is not None and st.button("하루 예상 매출 계산하기", type="primary"):
+        sel_sex_label = st.selectbox("성별", ["전체", "남성", "여성"], key="pred_sex")
+        sel_sex       = {"남성": "M", "여성": "F"}.get(sel_sex_label)
+
+        age_labels    = list(AGE_MAP.values())
+        sel_age_label = st.selectbox("나이대", ["전체"] + age_labels, key="pred_age")
+        sel_age       = {v: k for k, v in AGE_MAP.items()}.get(sel_age_label)
+
+        hour_labels    = list(HOUR_MAP.values())
+        sel_hour_label = st.selectbox("시간대", ["전체"] + hour_labels, key="pred_hour")
+        sel_hour       = {v: k for k, v in HOUR_MAP.items()}.get(sel_hour_label)
+
+    # 필수 조건 체크
+    pred_required = (
+        sel_district  != "전체" and
+        sel_admi_name != "전체" and
+        sel_month     != "전체" and
+        sel_day_label != "전체" and
+        sel_biz1      != "전체" and
+        sel_biz2      != "전체" and
+        sel_sex_label != "전체" and
+        sel_age_label != "전체" and
+        sel_hour_label!= "전체"
+    )
+
+    if not pred_required:
+        st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
+
+    if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
         try:
             model, model_info = load_saved_model()
 
-            # 선택 조건에 맞는 실제 데이터 필터링
-            ref_mask = (
+            # 선택 조건에 맞는 참조 데이터 필터링
+            ref = df[
                 (df["card_tpbuz_nm_2"] == sel_biz2) &
-                (df["day"] == sel_day) &
-                (df["month"] == sel_month)
-            )
-            ref = df[ref_mask] if ref_mask.sum() >= 10 else df[df["card_tpbuz_nm_2"] == sel_biz2]
+                (df["day"]   == sel_day) &
+                (df["month"] == sel_month) &
+                (df["sex"]   == sel_sex) &
+                (df["age"]   == sel_age) &
+                (df["hour"]  == sel_hour)
+            ]
+            if len(ref) < 5:
+                ref = df[df["card_tpbuz_nm_2"] == sel_biz2]
 
-            # 실제 데이터에 존재하는 시간대·성별·연령 조합 + 각 조합의 출현 날 수 계산
-            total_ref_days = ref["ta_ymd"].nunique() if "ta_ymd" in ref.columns and not ref.empty else 1
-            combo_days = (
-                ref.groupby(["hour", "sex", "age"])["ta_ymd"]
-                .nunique()
-                .reset_index()
-                .rename(columns={"ta_ymd": "days"})
-            ) if "ta_ymd" in ref.columns else (
-                ref[["hour", "sex", "age"]].drop_duplicates().assign(days=1)
-            )
-            combo_days = combo_days.dropna()
-            active_hours = int(ref["hour"].nunique()) if not ref.empty else 10
+            avg_cnt = int(round(ref["cnt"].mean())) if "cnt" in ref.columns and len(ref) > 0 else 1
+            sel_cnt = avg_cnt
 
-            # (시간대 × 성별 × 연령) 조합별 예측 — 캐시해서 세그먼트 표에 재사용
-            pred_cache = {}
-            for _, row in combo_days.iterrows():
-                h, s, a = int(row["hour"]), row["sex"], int(row["age"])
-                days = int(row["days"])
-                input_row = pd.DataFrame([{
-                    "sex": s, "age": a,
-                    "day": sel_day, "hour": h,
-                    "month": sel_month, "admi_cty_no": sel_admi,
-                    "card_tpbuz_nm_1": sel_biz1, "card_tpbuz_nm_2": sel_biz2,
-                    "cnt": sel_cnt,
-                }])
-                try:
-                    encoded  = transform_with_saved_encoders(input_row)
-                    raw_pred = model.predict(encoded)[0]
-                    p = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
-                except Exception:
-                    p = 0.0
-                # 출현 빈도(days/total_ref_days)를 가중치로 적용
-                weight = days / max(total_ref_days, 1)
-                pred_cache[(h, s, a)] = (p, weight)
+            # 모델 입력 구성
+            input_row = pd.DataFrame([{
+                "sex":             sel_sex,
+                "age":             sel_age,
+                "day":             sel_day,
+                "hour":            sel_hour,
+                "month":           sel_month,
+                "admi_cty_no":     sel_admi,
+                "card_tpbuz_nm_1": sel_biz1,
+                "card_tpbuz_nm_2": sel_biz2,
+                "cnt":             sel_cnt,
+            }])
+            encoded  = transform_with_saved_encoders(input_row)
+            raw_pred = model.predict(encoded)[0]
+            pred_amt = max(np.expm1(raw_pred) if model_info.get("use_log_target", True) else raw_pred, 0)
 
-            # 하루 예상 매출 = Σ(예측값 × 출현 빈도)
-            # → 해당 조합이 자주 나타날수록 더 많이 반영
-            weighted_preds = [p * w for p, w in pred_cache.values()]
-            preds          = [p for p, _ in pred_cache.values()]
-            daily_pred     = sum(weighted_preds)
-            avg_per_grp    = float(np.mean(preds)) if preds else 0.0
-
-            # ── 업체당 매출 계산 (SEMAS 중분류 매핑 가능 업종만) ──
-            store_cnt_df = load_store_counts()
-            semas_mid = CARD_TO_SEMAS_MID.get(sel_biz2)
-            per_store_pred = None
-            n_stores = 0
-            if store_cnt_df is not None and semas_mid and sel_admi:
-                sc = store_cnt_df[
-                    (store_cnt_df["행정동코드"] == str(sel_admi)) &
-                    (store_cnt_df["상권업종중분류명"] == semas_mid)
-                ]
-                n_stores = int(sc["store_count"].sum())
-                if n_stores > 0:
-                    per_store_pred = daily_pred / n_stores
+            # 실제 데이터 참조값
+            actual_mean = ref["amt"].mean() if len(ref) > 0 else 0
+            actual_med  = ref["amt"].median() if len(ref) > 0 else 0
 
             # 결과 표시
-            st.success(f"### {sel_admi_name} {sel_biz2} 동네 전체 예상 일매출: **{fmt(daily_pred)}**")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("조합당 평균 예측 매출", fmt(avg_per_grp))
-            c2.metric("분석에 사용된 조합 수", f"{len(preds)}개 (시간대×성별×연령)")
-            if per_store_pred is not None:
-                c3.metric("업체당 예상 일매출",
-                          fmt(per_store_pred),
-                          help=f"SEMAS 기준 {sel_admi_name} '{semas_mid}' 업체 수: {n_stores:,}개")
-            elif semas_mid is None:
-                c3.metric("업체당 예상 일매출", "데이터 없음",
-                          help=f"'{sel_biz2}'은 소상공인 상가정보와 업종 분류가 달라 업체 수 추정 불가")
-            else:
-                c3.metric("업체당 예상 일매출", "-", help="동네를 선택하면 업체당 매출이 표시됩니다")
+            st.success(
+                f"### {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} {sel_hour_label} "
+                f"· {sel_age_label} {sel_sex_label} 예측 1인당 소비금액: **{fmt(pred_amt)}**"
+            )
 
-            with st.expander("계산 과정 보기"):
-                st.text(f"- 예측에 사용된 조합 수: {len(preds)}개 (시간대 × 성별 × 연령)")
-                st.text(f"- 시간대당 거래건수(입력값): {sel_cnt}건")
-                st.text(f"- 하루 활성 시간대: {active_hours}개 (실제 데이터 기준)")
-                st.text(f"- 기준 날짜 수: {total_ref_days}일")
-                st.text(f"- 하루 예상 매출 = Σ(조합 예측값 × 출현 빈도) = {fmt(daily_pred)}")
-                st.text(f"  (자주 나타나는 조합일수록 더 많이 반영, 희귀 조합은 적게 반영)")
+            r1, r2, r3 = st.columns(3)
+            r1.metric("예측 1인당 소비금액", fmt(pred_amt))
+            r2.metric("실제 데이터 평균", fmt(actual_mean), help=f"참조 데이터 {len(ref):,}건 기준")
+            r3.metric("실제 데이터 중앙값", fmt(actual_med))
 
-            st.caption(f"※ {sel_district} {sel_admi_name} · {sel_biz2} · {sel_month}월 {sel_day_label} 기준 예측")
+            # 유사 조건 분포 차트
+            if len(ref) >= 5:
+                st.divider()
+                st.markdown("#### 📊 유사 조건 소비금액 분포")
+                amt_clip = ref["amt"].clip(upper=ref["amt"].quantile(0.95))
+                fig_dist = go.Figure(go.Histogram(
+                    x=amt_clip, nbinsx=30,
+                    marker_color="#58a6ff", opacity=0.8,
+                    hovertemplate="소비금액: %{x:,.0f}원<br>건수: %{y}<extra></extra>",
+                ))
+                fig_dist.add_vline(x=pred_amt, line_color="#f78166", line_dash="dash",
+                                   annotation_text=f"예측값 {fmt(pred_amt)}", annotation_position="top right")
+                fig_dist.add_vline(x=actual_mean, line_color="#3fb950", line_dash="dot",
+                                   annotation_text=f"실제 평균 {fmt(actual_mean)}", annotation_position="top left")
+                fig_dist.update_layout(
+                    xaxis_title="1인당 소비금액 (원)", yaxis_title="건수",
+                    height=320, margin=dict(t=30, b=40),
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
 
-            # ── 고객 세그먼트별 상세 분석 표 ──
+            # 동일 업종 내 성별/연령대 비교
             st.divider()
-            st.subheader("고객 유형별 매출 분석")
+            st.markdown("#### 👥 동일 업종 내 조건별 평균 소비금액 비교")
+            biz_ref = df[df["card_tpbuz_nm_2"] == sel_biz2]
 
-            seg_rows = []
-            total_ref_cnt = len(ref)
-            for _, combo in combo_days.iterrows():
-                h, s, a = int(combo["hour"]), combo["sex"], int(combo["age"])
-                days = int(combo["days"])
-                weight = days / max(total_ref_days, 1)
-                seg_mask  = (ref["hour"] == h) & (ref["sex"] == s) & (ref["age"] == a)
-                seg_cnt   = seg_mask.sum()
-                seg_ratio = seg_cnt / total_ref_cnt * 100 if total_ref_cnt > 0 else 0
-                p, _ = pred_cache.get((h, s, a), (0.0, 0.0))
+            cmp1, cmp2 = st.columns(2)
+            with cmp1:
+                age_avg = (biz_ref.groupby("age")["amt"].mean().reset_index())
+                age_avg["연령대"] = age_avg["age"].map(AGE_MAP)
+                colors = ["#f78166" if a == sel_age else "#58a6ff" for a in age_avg["age"]]
+                fig_age = go.Figure(go.Bar(
+                    x=age_avg["연령대"], y=age_avg["amt"],
+                    marker_color=colors,
+                    hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+                ))
+                fig_age.update_layout(title="연령대별 평균 소비", xaxis_title="연령대",
+                                      yaxis_title="평균 소비금액 (원)", height=300, margin=dict(t=40,b=40))
+                st.plotly_chart(fig_age, use_container_width=True)
 
-                seg_rows.append({
-                    "시간대":            HOUR_MAP.get(h, str(h)),
-                    "성별":              "여성" if s == "F" else "남성",
-                    "연령대":            AGE_MAP.get(a, f"{a}"),
-                    "조합 예측 매출(원)": int(p),
-                    "출현 빈도":         f"{weight*100:.0f}% ({days}/{total_ref_days}일)",
-                    "가중 예측 매출(원)": int(p * weight),
-                    "데이터 비중(%)":    round(seg_ratio, 1),
-                })
+            with cmp2:
+                sex_avg = (biz_ref.groupby("sex")["amt"].mean().reset_index())
+                sex_avg["성별"] = sex_avg["sex"].map(SEX_MAP)
+                colors_s = ["#f78166" if s == sel_sex else "#58a6ff" for s in sex_avg["sex"]]
+                fig_sex = go.Figure(go.Bar(
+                    x=sex_avg["성별"], y=sex_avg["amt"],
+                    marker_color=colors_s,
+                    hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+                ))
+                fig_sex.update_layout(title="성별 평균 소비", xaxis_title="성별",
+                                      yaxis_title="평균 소비금액 (원)", height=300, margin=dict(t=40,b=40))
+                st.plotly_chart(fig_sex, use_container_width=True)
 
-            if seg_rows:
-                seg_df = (
-                    pd.DataFrame(seg_rows)
-                    .sort_values("데이터 비중(%)", ascending=False)
-                    .reset_index(drop=True)
-                )
+            hour_avg = (biz_ref.groupby("hour")["amt"].mean().reset_index())
+            hour_avg["시간대"] = hour_avg["hour"].map(HOUR_MAP)
+            colors_h = ["#f78166" if h == sel_hour else "#58a6ff" for h in hour_avg["hour"]]
+            fig_hour = go.Figure(go.Bar(
+                x=hour_avg["시간대"], y=hour_avg["amt"],
+                marker_color=colors_h,
+                hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+            ))
+            fig_hour.update_layout(title="시간대별 평균 소비", xaxis_title="시간대",
+                                   yaxis_title="평균 소비금액 (원)", height=300,
+                                   margin=dict(t=40,b=40), xaxis_tickangle=-30)
+            st.plotly_chart(fig_hour, use_container_width=True)
 
-                # 요약 피벗: 연령대 × 성별 가중 예측 매출 합계
-                st.markdown("**연령대 × 성별 가중 예측 매출 합계 (원)**")
-                pivot = (
-                    seg_df.groupby(["연령대", "성별"])["가중 예측 매출(원)"]
-                    .sum()
-                    .round(0)
-                    .astype(int)
-                    .unstack("성별")
-                    .reindex([v for v in AGE_MAP.values() if v in seg_df["연령대"].values])
-                )
-                st.dataframe(
-                    pivot.style.format("{:,}").background_gradient(cmap="Blues", axis=None),
-                    width="stretch"
-                )
-
-                # 전체 세그먼트 상세 표
-                st.markdown("**시간대 × 성별 × 연령대 상세**")
-                st.dataframe(
-                    seg_df.style.format({
-                        "조합 예측 매출(원)": "{:,}",
-                        "가중 예측 매출(원)": "{:,}",
-                        "데이터 비중(%)": "{:.1f}%",
-                    }).background_gradient(subset=["가중 예측 매출(원)"], cmap="Greens"),
-                    width="stretch",
-                    hide_index=True,
-                )
+            st.caption(
+                f"※ 선택 조건: {sel_district} {sel_admi_name} · {sel_biz2} · "
+                f"{sel_month}월 {sel_day_label} {sel_hour_label} · {sel_age_label} {sel_sex_label}"
+            )
 
         except Exception as e:
             st.error(f"예측 오류: {e}")
