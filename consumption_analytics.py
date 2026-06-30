@@ -1218,29 +1218,6 @@ sales_enc     = st.session_state.get("sales_enc", "-")
 sales_path    = st.session_state.get("sales_path", "-")
 loaded_yyyymm = st.session_state["loaded_yyyymm"]
 
-# 사이드바: 월 변경 버튼
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"**📅 데이터: {YYYYMM_LABEL[loaded_yyyymm]}**")
-selected_yyyymm = st.sidebar.selectbox(
-    "월 변경",
-    AVAILABLE_YYYYMM,
-    format_func=lambda x: YYYYMM_LABEL[x],
-    index=AVAILABLE_YYYYMM.index(loaded_yyyymm),
-    key="selected_yyyymm",
-)
-if st.sidebar.button("🔄 변경", key="change_month_btn") and selected_yyyymm != loaded_yyyymm:
-    csv_ok = ensure_month_csvs(selected_yyyymm)
-    if csv_ok:
-        try:
-            with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
-                raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
-                st.session_state["df"]            = preprocess_data(raw_df)
-                st.session_state["loaded_yyyymm"] = selected_yyyymm
-                st.session_state["sales_enc"]     = sales_enc
-                st.session_state["sales_path"]    = sales_path
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"로드 실패: {e}")
 
 # ── 행정동 코드 로드 (없어도 앱 계속 동작) ─────────────
 try:
