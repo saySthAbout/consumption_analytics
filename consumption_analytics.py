@@ -836,10 +836,9 @@ except Exception:
     admin_path              = "-"
 
 # ── 탭 (항상 생성) ───────────────────────────────────────
-tab_pred, tab_hm, tab_eda, tab_lstm, tab_cluster, tab_ai, tab_fp, tab_semas, tab_ov = st.tabs([
+tab_pred, tab_hm, tab_lstm, tab_cluster, tab_ai, tab_fp, tab_semas, tab_ov = st.tabs([
     "💰 매출 예측",
     "⏰ 시간대·요일 분석",
-    "📊 소비 트렌드",
     "📈 시계열 예측",
     "👥 고객 군집 분석",
     "📝 AI 리포트",
@@ -1104,64 +1103,130 @@ with tab_ov:
 # =====================================================
 # 📊 소비 트렌드 (구 탭2)
 # =====================================================
-with tab_eda:
-    st.subheader("소비 데이터 현황")
-    missing_df = pd.DataFrame({
-        "컬럼명":       df.columns,
-        "결측치 개수":  df.isnull().sum().values,
-        "결측 비율(%)": (df.isnull().mean().values * 100).round(2),
-    })
-    c1, c2 = st.columns(2)
-    c1.metric("전체 결측치 개수", f"{int(df.isnull().sum().sum()):,}")
-    c2.metric("중복 행 개수",     f"{int(df.duplicated().sum()):,}")
-    st.dataframe(missing_df, width='stretch')
-
-    st.subheader("주요 지표 통계")
-    disp_cols = [c for c in ["amt","cnt","log_amt","log_cnt"] if c in df.columns]
-    st.dataframe(df[disp_cols].describe().T, width='stretch')
-
-    st.subheader("매출 분포")
-    with st.spinner("히스토그램 생성 중..."):
-        hist_fig = plot_histograms(df)
-    st.pyplot(hist_fig)
-    st.download_button("Histogram 이미지 다운로드", data=fig_to_bytes(hist_fig),
-                       file_name="histogram_amt_log_amt.png", mime="image/png")
-
 # =====================================================
-# ⏰ 시간대·요일 분석 (구 탭3)
+# ⏰ 시간대·요일 분석
 # =====================================================
 with tab_hm:
     st.subheader("언제 매출이 높을까요?")
-    with st.spinner("상관관계 Heatmap 생성 중..."):
-        corr_fig, corr_df = plot_corr_heatmap(df)
-    st.pyplot(corr_fig)
-    st.download_button("상관관계 Heatmap 다운로드", data=fig_to_bytes(corr_fig),
-                       file_name="correlation_heatmap.png", mime="image/png")
-    st.dataframe(corr_df.round(3), width='stretch')
+    st.caption("조건을 모두 선택하면 해당 지역·업종의 시간대·요일 분석 차트를 보여줍니다.")
 
-    st.subheader("연령대별 · 시간대별 소비 현황")
-    with st.spinner("연령대 × 시간대 Heatmap 생성 중..."):
-        ah_fig, ah_tbl = plot_age_hour_heatmap(df)
-    st.pyplot(ah_fig)
-    st.download_button("연령대_시간대 Heatmap 다운로드", data=fig_to_bytes(ah_fig),
-                       file_name="age_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(ah_tbl.round(2), width='stretch')
+    # ── 필터 ──
+    hm1, hm2 = st.columns(2)
+    with hm1:
+        if admin_ok:
+            hm_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="hm_dist")
+            hm_dong_opts = ["전체"] + admin_district_to_dongs.get(hm_district, []) if hm_district != "전체" else ["전체"]
+            hm_admi_name = st.selectbox("동네 선택", hm_dong_opts, key="hm_dong")
+        else:
+            hm_district = hm_admi_name = "전체"
+        hm_month = st.selectbox("월", ["전체"] + [f"{m}월" for m in range(1, 13)], key="hm_month")
+    with hm2:
+        hm_biz1      = st.selectbox("업종 대분류", ["전체"] + sorted(df["card_tpbuz_nm_1"].dropna().unique()), key="hm_biz1")
+        hm_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == hm_biz1]["card_tpbuz_nm_2"].dropna().unique()) if hm_biz1 != "전체" else ["전체"]
+        hm_biz2      = st.selectbox("업종 중분류", hm_biz2_opts, key="hm_biz2")
 
-    st.subheader("요일 · 시간대별 소비 현황")
-    with st.spinner("요일 × 시간대 Heatmap 생성 중..."):
-        dh_fig, dh_tbl = plot_day_hour_heatmap(df)
-    st.pyplot(dh_fig)
-    st.download_button("요일_시간대 Heatmap 다운로드", data=fig_to_bytes(dh_fig),
-                       file_name="day_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(dh_tbl.round(2), width='stretch')
+    # ── 필수 조건 체크 ──
+    hm_required = (
+        hm_district  != "전체" and
+        hm_admi_name != "전체" and
+        hm_month     != "전체" and
+        hm_biz1      != "전체" and
+        hm_biz2      != "전체"
+    )
 
-    st.subheader("업종 TOP 10 · 시간대별 매출 현황")
-    with st.spinner("업종 × 시간대 Heatmap 생성 중..."):
-        bh_fig, bh_tbl = plot_biz_hour_heatmap(df, top_n=10)
-    st.pyplot(bh_fig)
-    st.download_button("업종_시간대 Heatmap 다운로드", data=fig_to_bytes(bh_fig),
-                       file_name="biz_hour_sales_heatmap.png", mime="image/png")
-    st.dataframe(bh_tbl.round(2), width='stretch')
+    if not hm_required:
+        st.info("📌 지역(시/구), 동네, 월, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
+    else:
+        # ── 필터 적용 ──
+        hm_df = df.copy()
+        if admin_ok:
+            hm_code = admin_name_to_code.get(hm_admi_name)
+            if hm_code:
+                hm_df = hm_df[hm_df["admi_cty_no"] == hm_code]
+        hm_df = hm_df[hm_df["card_tpbuz_nm_1"] == hm_biz1]
+        hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
+        hm_m  = int(hm_month.replace("월", ""))
+        hm_df = hm_df[hm_df["month"] == hm_m]
+
+        if hm_df.empty:
+            st.warning("선택 조건에 해당하는 데이터가 없습니다.")
+        else:
+            st.caption(f"분석 데이터: {len(hm_df):,}건")
+
+            # ── 차트 1: 시간대별 매출 ──
+            st.markdown("#### ⏰ 시간대별 매출")
+            hour_grp = hm_df.groupby("hour")["amt"].sum().reset_index()
+            hour_grp["시간대"] = hour_grp["hour"].map(HOUR_MAP)
+            fig_hour = go.Figure(go.Bar(
+                x=hour_grp["시간대"], y=hour_grp["amt"],
+                marker=dict(color=hour_grp["amt"], colorscale="Blues", showscale=False),
+                hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+            ))
+            fig_hour.update_layout(xaxis_title="시간대", yaxis_title="매출액 (원)",
+                                   height=320, margin=dict(t=10, b=40),
+                                   xaxis_tickangle=-30)
+            st.plotly_chart(fig_hour, use_container_width=True)
+
+            # ── 차트 2: 요일별 매출 ──
+            st.markdown("#### 📅 요일별 매출")
+            dow_order = ["월","화","수","목","금","토","일"]
+            day_grp = hm_df.groupby("day")["amt"].sum().reset_index()
+            day_grp["요일"] = day_grp["day"].map(DAY_MAP)
+            day_grp["요일"] = pd.Categorical(day_grp["요일"], categories=dow_order, ordered=True)
+            day_grp = day_grp.sort_values("요일")
+            fig_day = go.Figure(go.Bar(
+                x=day_grp["요일"], y=day_grp["amt"],
+                marker=dict(color=day_grp["amt"], colorscale="Oranges", showscale=False),
+                hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+            ))
+            fig_day.update_layout(xaxis_title="요일", yaxis_title="매출액 (원)",
+                                  height=320, margin=dict(t=10, b=40))
+            st.plotly_chart(fig_day, use_container_width=True)
+
+            # ── 차트 3: 요일 × 시간대 히트맵 ──
+            st.markdown("#### 🔥 요일 × 시간대 매출 히트맵")
+            dh_pivot = (hm_df.groupby(["day","hour"])["amt"].sum()
+                        .unstack(fill_value=0))
+            dh_pivot.index = [DAY_MAP.get(d, d) for d in dh_pivot.index]
+            dh_pivot.columns = [HOUR_MAP.get(h, str(h)) for h in dh_pivot.columns]
+            dh_pivot = dh_pivot.reindex([d for d in dow_order if d in dh_pivot.index])
+            fig_dh = go.Figure(go.Heatmap(
+                z=dh_pivot.values,
+                x=dh_pivot.columns.tolist(),
+                y=dh_pivot.index.tolist(),
+                colorscale="Blues",
+                hovertemplate="요일: %{y}<br>시간: %{x}<br>매출: %{z:,.0f}원<extra></extra>",
+            ))
+            fig_dh.update_layout(xaxis_title="시간대", yaxis_title="요일",
+                                 height=340, margin=dict(t=10, b=40),
+                                 xaxis_tickangle=-30)
+            st.plotly_chart(fig_dh, use_container_width=True)
+
+            # ── 차트 4: 연령대별 매출 ──
+            st.markdown("#### 👤 연령대별 매출")
+            age_grp = hm_df.groupby("age")["amt"].sum().reset_index()
+            age_grp["연령대"] = age_grp["age"].map(AGE_MAP)
+            fig_age = go.Figure(go.Bar(
+                x=age_grp["연령대"], y=age_grp["amt"],
+                marker=dict(color=age_grp["amt"], colorscale="Purples", showscale=False),
+                hovertemplate="%{x}: %{y:,.0f}원<extra></extra>",
+            ))
+            fig_age.update_layout(xaxis_title="연령대", yaxis_title="매출액 (원)",
+                                  height=320, margin=dict(t=10, b=40))
+            st.plotly_chart(fig_age, use_container_width=True)
+
+            # ── 차트 5: 성별 매출 비중 ──
+            st.markdown("#### 🚻 성별 매출 비중")
+            sex_grp = hm_df.groupby("sex")["amt"].sum().reset_index()
+            sex_grp["성별"] = sex_grp["sex"].map(SEX_MAP)
+            fig_sex = go.Figure(go.Pie(
+                labels=sex_grp["성별"], values=sex_grp["amt"],
+                marker_colors=["#60a5fa","#f472b6"],
+                hole=0.4,
+                hovertemplate="%{label}: %{value:,.0f}원 (%{percent})<extra></extra>",
+            ))
+            fig_sex.update_layout(height=320, margin=dict(t=10, b=10))
+            st.plotly_chart(fig_sex, use_container_width=True)
 
 # =====================================================
 # 📈 시계열 예측 (LSTM)
