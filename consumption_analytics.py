@@ -1325,15 +1325,11 @@ with tab_pred:
         sel_hour_label!= "전체"
     )
 
-    # 월 선택 시 즉시 데이터 다운로드 (업종 드롭다운 채우기 위해)
-    if sel_month != "전체":
+    # 지역+월 모두 선택 시에만 데이터 다운로드 트리거
+    if sel_district != "전체" and sel_month != "전체":
         if "month" not in df.columns or sel_month not in df["month"].values:
-            city = sel_district if sel_district != "전체" else None
-            label = f"{sel_district} " if sel_district != "전체" else ""
-            st.info(f"🔄 {label}{sel_month}월 데이터 다운로드 중... (완료 후 자동 갱신)")
-            ok = ensure_month_in_df(sel_month, city_korean=city)
-            if not ok:
-                st.error(f"{sel_month}월 데이터 다운로드 실패. 다시 시도해주세요.")
+            city = sel_district
+            ensure_month_in_df(sel_month, city_korean=city)
             st.stop()
 
     if not pred_required:
@@ -1470,8 +1466,7 @@ with tab_hm:
         else:
             hm_district = hm_admi_name = "전체"
         _hm_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
-        hm_month = st.selectbox("월", _hm_month_opts, key="hm_month",
-                                index=int(loaded_yyyymm[-2:]))
+        hm_month = st.selectbox("월", _hm_month_opts, key="hm_month", index=0)
     with hm2:
         hm_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="hm_biz1")
         hm_biz2_opts = ["전체"] + BIZ2_MAP.get(hm_biz1, []) if hm_biz1 != "전체" else ["전체"]
@@ -1745,8 +1740,7 @@ with tab_cluster:
         else:
             cl_district = cl_admi_name = "전체"
         _cl_month_opts = ["전체"] + [f"{m}월" for m in sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})]
-        cl_month = st.selectbox("월", _cl_month_opts, key="cl_month",
-                                index=int(loaded_yyyymm[-2:]))
+        cl_month = st.selectbox("월", _cl_month_opts, key="cl_month", index=0)
         all_days  = list(DAY_MAP.values())
         cl_days   = st.multiselect("요일 (전체 선택 = 모든 요일)", all_days, default=all_days, key="cl_days")
     with cl2:
