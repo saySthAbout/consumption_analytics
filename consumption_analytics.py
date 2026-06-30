@@ -991,6 +991,8 @@ with tab_pred:
                                    annotation_text=f"실제 평균 {fmt(actual_mean)}", annotation_position="top left")
                 fig_dist.update_layout(
                     xaxis_title="1인당 소비금액 (원)", yaxis_title="건수",
+                    xaxis=dict(tickformat=",d"),
+                    yaxis=dict(tickformat=",d"),
                     height=320, margin=dict(t=30, b=40),
                 )
                 st.plotly_chart(fig_dist, use_container_width=True)
@@ -1016,6 +1018,7 @@ with tab_pred:
                 ))
                 fig_age.update_layout(title="연령대별 1인당 평균 소비 (구매 고객 기준)",
                                       xaxis_title="연령대", yaxis_title="1인당 소비금액 (원)",
+                                      yaxis=dict(tickformat=",d"),
                                       height=300, margin=dict(t=40, b=40))
                 st.plotly_chart(fig_age, use_container_width=True)
 
@@ -1030,6 +1033,7 @@ with tab_pred:
                 ))
                 fig_sex.update_layout(title="성별 1인당 평균 소비 (구매 고객 기준)",
                                       xaxis_title="성별", yaxis_title="1인당 소비금액 (원)",
+                                      yaxis=dict(tickformat=",d"),
                                       height=300, margin=dict(t=40, b=40))
                 st.plotly_chart(fig_sex, use_container_width=True)
 
@@ -1043,6 +1047,7 @@ with tab_pred:
             ))
             fig_hour.update_layout(title="시간대별 1인당 평균 소비 (구매 고객 기준)",
                                    xaxis_title="시간대", yaxis_title="1인당 소비금액 (원)",
+                                   yaxis=dict(tickformat=",d"),
                                    height=300, margin=dict(t=40, b=40), xaxis_tickangle=-30)
             st.plotly_chart(fig_hour, use_container_width=True)
 
