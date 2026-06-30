@@ -1171,8 +1171,9 @@ model_name      = "LightGBM"
 loaded_yyyymm = st.session_state.get("loaded_yyyymm")
 
 if "df" not in st.session_state:
-    _init_yyyymm = AVAILABLE_YYYYMM[-1]  # 가장 최신 월 자동 로드
-    csv_ok = ensure_month_csvs(_init_yyyymm)
+    _init_yyyymm = AVAILABLE_YYYYMM[-1]
+    # 처음엔 기본 도시 1개 파일만 다운로드 (나머지는 조회 시 온디맨드)
+    csv_ok = ensure_city_month_csv("화성시", _init_yyyymm)
     if csv_ok:
         try:
             with st.spinner(f"{YYYYMM_LABEL[_init_yyyymm]} 데이터 로드 중..."):
@@ -1473,9 +1474,9 @@ with tab_hm:
         hm_df = hm_df[hm_df["card_tpbuz_nm_1"] == hm_biz1]
         hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
         hm_m  = int(hm_month.replace("월", ""))
-        # 해당 월 데이터가 없으면 자동 다운로드
+        # 해당 지역·월 데이터가 없으면 해당 도시만 다운로드
         if hm_m not in df["month"].values:
-            ensure_month_in_df(hm_m)
+            ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
         hm_df = hm_df[hm_df["month"] == hm_m]
 
         if hm_df.empty:
@@ -1743,7 +1744,7 @@ with tab_cluster:
     if cl_month != "전체":
         cl_m = int(cl_month.replace("월", ""))
         if cl_m not in df["month"].values:
-            ensure_month_in_df(cl_m)
+            ensure_month_in_df(cl_m, city_korean=cl_district if cl_district != "전체" else None)
         cl_df = cl_df[cl_df["month"] == cl_m]
     if cl_days and len(cl_days) < len(all_days):
         day_rev = {v: k for k, v in DAY_MAP.items()}
