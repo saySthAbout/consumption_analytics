@@ -957,12 +957,8 @@ with tab_pred:
                 f"· {sel_age_label} {sel_sex_label}  예측 1인당 소비금액: **{fmt(pred_amt)}**"
             )
 
-            r1, r2, r3 = st.columns(3)
-            r1.metric("예측 1인당 소비금액", fmt(pred_amt),
+            st.metric("예측 1인당 소비금액", fmt(pred_amt),
                       help=f"모델 예측 그룹 총매출({fmt(pred_grp)}) ÷ 평균 거래건수({sel_cnt}건)")
-            r2.metric("실제 1인당 평균", fmt(actual_mean),
-                      help=f"참조 데이터 {len(ref):,}건 기준 · amt÷cnt 평균")
-            r3.metric("실제 1인당 중앙값", fmt(actual_med))
 
             # 유사 조건 분포 차트
             if len(ref) >= 5:
@@ -987,8 +983,6 @@ with tab_pred:
                 ))
                 fig_dist.add_vline(x=pred_amt, line_color="#f78166", line_dash="dash",
                                    annotation_text=f"예측값 {fmt(pred_amt)}", annotation_position="top right")
-                fig_dist.add_vline(x=actual_mean, line_color="#3fb950", line_dash="dot",
-                                   annotation_text=f"실제 평균 {fmt(actual_mean)}", annotation_position="top left")
                 fig_dist.update_layout(
                     xaxis_title="1인당 소비금액 (원)", yaxis_title="건수",
                     xaxis=dict(tickformat=",d"),
