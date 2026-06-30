@@ -459,6 +459,35 @@ def load_sales_data(yyyymm: str):
     return raw, enc, path
 
 
+def ensure_month_in_df(month_int: int) -> bool:
+    """df에 해당 월 데이터가 없으면 다운로드 후 merge. True=데이터 있음."""
+    df_cur = st.session_state.get("df")
+    if df_cur is not None and month_int in df_cur["month"].values:
+        return True
+    # yyyymm 계산: 로드된 연도 기준 (예: 202603 → 년=2026)
+    base = st.session_state.get("loaded_yyyymm", "202603")
+    year = int(base[:4])
+    yyyymm = f"{year}{month_int:02d}"
+    csv_ok = ensure_month_csvs(yyyymm)
+    if not csv_ok:
+        return False
+    try:
+        with st.spinner(f"{month_int}월 데이터 로드 중..."):
+            raw_new, _, _ = load_sales_data(yyyymm)
+            df_new = preprocess_data(raw_new)
+        if df_cur is not None:
+            merged = pd.concat([df_cur, df_new], ignore_index=True)
+            merged = merged.drop_duplicates()
+        else:
+            merged = df_new
+        st.session_state["df"] = merged
+        st.rerun()
+    except Exception as e:
+        st.error(f"{month_int}월 데이터 로드 실패: {e}")
+        return False
+    return True
+
+
 def find_admin_path():
     for p in ADMIN_CODE_PATHS:
         if os.path.exists(p):
@@ -1203,6 +1232,10 @@ with tab_pred:
     if not pred_required:
         st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
 
+    if pred_required and sel_month != "전체":
+        if sel_month not in df["month"].values:
+            ensure_month_in_df(sel_month)
+
     if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
         try:
             model, model_info = load_saved_model()
@@ -1363,6 +1396,9 @@ with tab_hm:
         hm_df = hm_df[hm_df["card_tpbuz_nm_1"] == hm_biz1]
         hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
         hm_m  = int(hm_month.replace("월", ""))
+        # 해당 월 데이터가 없으면 자동 다운로드
+        if hm_m not in df["month"].values:
+            ensure_month_in_df(hm_m)
         hm_df = hm_df[hm_df["month"] == hm_m]
 
         if hm_df.empty:
@@ -1629,6 +1665,8 @@ with tab_cluster:
         cl_df = cl_df[cl_df["card_tpbuz_nm_2"] == cl_biz2]
     if cl_month != "전체":
         cl_m = int(cl_month.replace("월", ""))
+        if cl_m not in df["month"].values:
+            ensure_month_in_df(cl_m)
         cl_df = cl_df[cl_df["month"] == cl_m]
     if cl_days and len(cl_days) < len(all_days):
         day_rev = {v: k for k, v in DAY_MAP.items()}
