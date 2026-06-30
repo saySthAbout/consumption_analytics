@@ -529,8 +529,11 @@ def _save_fileid_map(fmap: dict) -> None:
         pass
 
 
+HF_DATASET_REPO = "JinAhKwak/gyeonggi-card-csvs"
+
+
 def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
-    """선택 도시·월 CSV 파일 1개만 다운로드. 헤더만 읽어 ID를 확정 후 해당 파일만 저장."""
+    """선택 도시·월 CSV 파일 1개를 HuggingFace Dataset에서 다운로드."""
     import requests
     os.makedirs(CARD_CSV_DIR, exist_ok=True)
     city_en = CITY_KO_TO_EN.get(city_korean)
@@ -542,57 +545,34 @@ def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
         return True
 
     target_name = f"tbsh_gyeonggi_day_{yyyymm}_{city_en}.csv" if city_en else None
+    if not target_name:
+        return False
 
-    # 캐시 맵에서 ID 바로 조회
-    fmap = _load_fileid_map()
-    if target_name and target_name in fmap:
-        fid = fmap[target_name]
-        label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}"
-        with st.spinner(f"{label} 데이터 다운로드 중..."):
-            saved = _download_gdrive_csv(fid, CARD_CSV_DIR)
-        return saved is not None
+    label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}"
+    url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{target_name}"
+    out = os.path.join(CARD_CSV_DIR, target_name)
 
-    # 맵에 없으면 순차 스캔: 헤더만 읽어 파일명 확인 → 일치하면 그 파일만 다운로드
-    existing_names = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
-    known_ids = set(fmap.values())
-    pending = [fid for fid in CARD_FILE_IDS
-               if fid not in known_ids and not any(fid[:10] in n for n in existing_names)]
-
-    label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}" if city_en else YYYYMM_LABEL.get(yyyymm, yyyymm)
-    with st.spinner(f"{label} 파일 검색 중..."):
-        for fid in pending:
-            url = (f"https://drive.usercontent.google.com/download"
-                   f"?id={fid}&export=download&confirm=t")
-            try:
-                resp = requests.get(url, stream=True, timeout=60,
-                                    allow_redirects=True,
-                                    headers={"User-Agent": "Mozilla/5.0"})
-                fname = _extract_cd_fname(resp.headers, fid)
-                # 알게 된 파일명은 맵에 저장
-                fmap[fname] = fid
-                st.session_state["_fileid_map"] = fmap
-                _save_fileid_map(fmap)
-
-                if target_name and fname == target_name:
-                    # 바로 이 파일을 저장
-                    out = os.path.join(CARD_CSV_DIR, fname)
-                    size = 0
-                    with open(out, "wb") as fp:
-                        for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
-                            if chunk:
-                                fp.write(chunk)
-                                size += len(chunk)
-                    resp.close()
-                    if size < 1024:
-                        os.remove(out)
-                        return False
-                    return True
-                else:
-                    resp.close()  # 본문 읽지 않고 스킵
-            except Exception:
-                continue
-
-    return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
+    with st.spinner(f"{label} 데이터 다운로드 중..."):
+        try:
+            resp = requests.get(url, stream=True, timeout=120,
+                                headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code == 404:
+                st.error(f"{target_name} 파일을 찾을 수 없습니다.")
+                return False
+            resp.raise_for_status()
+            size = 0
+            with open(out, "wb") as fp:
+                for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
+                    if chunk:
+                        fp.write(chunk)
+                        size += len(chunk)
+            if size < 1024:
+                os.remove(out)
+                return False
+            return True
+        except Exception as e:
+            st.error(f"다운로드 실패: {e}")
+            return False
 
 
 def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
