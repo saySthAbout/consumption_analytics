@@ -345,49 +345,72 @@ def load_flowpop_data(zip_path: str) -> dict:
 
 
 @st.cache_data
-def load_semas_data(semas_dir: str, zip_path: str) -> pd.DataFrame:
-    """SEMAS 상가 데이터 로드 — CSV 파일 또는 zip에서 읽음."""
+def load_semas_data(semas_dir: str, zip_path: str) -> dict:
+    """SEMAS 데이터를 파일별로 읽으면서 즉시 집계 — 작은 집계 DataFrame 딕셔너리 반환."""
+    import zipfile, io
+
     use_cols = [
-        "상가업소번호", "상호명", "상권업종대분류명",
-        "상권업종중분류명", "상권업종소분류명",
-        "시도명", "시군구명", "행정동명", "행정동코드",
-        "도로명주소", "경도", "위도",
+        "상호명", "상권업종대분류명", "상권업종중분류명", "상권업종소분류명",
+        "시도명", "시군구명", "행정동명", "경도", "위도",
     ]
+    key_cols  = ["시도명", "시군구명", "행정동명"]
+    MAP_SAMPLE_PER_FILE = 400   # 파일당 지도 샘플 수 (16파일 × 400 = 6,400개)
 
-    def _read_csv_bytes(raw_bytes):
-        import io
-        return pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8", usecols=use_cols)
+    cnt_frames, map_frames, dong_frames = [], [], []
 
-    frames = []
+    def _process(chunk):
+        chunk = chunk.dropna(subset=["상권업종대분류명"])
+        chunk["경도"] = pd.to_numeric(chunk.get("경도", pd.Series(dtype=float)), errors="coerce")
+        chunk["위도"] = pd.to_numeric(chunk.get("위도", pd.Series(dtype=float)), errors="coerce")
 
-    # 1) CSV 파일이 이미 풀려 있으면 그대로 사용
+        # ① 경쟁 강도·입지 추천용: 동×중분류 점포 수
+        cnt = (chunk.groupby(key_cols + ["상권업종대분류명", "상권업종중분류명"])
+               .size().reset_index(name="점포수"))
+        cnt_frames.append(cnt)
+
+        # ② 지도용: 좌표 있는 행만 샘플링
+        has_coord = chunk.dropna(subset=["경도", "위도"])
+        sample_n  = min(MAP_SAMPLE_PER_FILE, len(has_coord))
+        if sample_n > 0:
+            map_frames.append(
+                has_coord[["상호명","상권업종대분류명","상권업종중분류명","행정동명","경도","위도"]]
+                .sample(sample_n, random_state=42)
+            )
+
+        # ③ 주변 상권 검색용: 동×대분류×중분류 점포 수
+        dong_cnt = (chunk.groupby(key_cols + ["상권업종대분류명","상권업종중분류명","상권업종소분류명"])
+                    .size().reset_index(name="점포수"))
+        dong_frames.append(dong_cnt)
+
     csv_files = sorted(glob.glob(os.path.join(semas_dir, "semas_store_info_*.csv")))
     if csv_files:
         for fp in csv_files:
             try:
-                frames.append(pd.read_csv(fp, encoding="utf-8", usecols=use_cols))
+                _process(pd.read_csv(fp, encoding="utf-8", usecols=use_cols))
             except Exception:
                 pass
-
-    # 2) CSV 없으면 zip에서 직접 읽기
     elif os.path.exists(zip_path):
-        import zipfile, io
         with zipfile.ZipFile(zip_path, "r") as zf:
             for name in zf.namelist():
                 if name.endswith(".csv"):
                     try:
-                        frames.append(_read_csv_bytes(zf.read(name)))
+                        _process(pd.read_csv(io.BytesIO(zf.read(name)),
+                                             encoding="utf-8", usecols=use_cols))
                     except Exception:
                         pass
 
-    if not frames:
-        return pd.DataFrame()
+    if not cnt_frames:
+        return {}
 
-    semas = pd.concat(frames, ignore_index=True)
-    semas = semas.dropna(subset=["경도", "위도"])
-    semas["경도"] = pd.to_numeric(semas["경도"], errors="coerce")
-    semas["위도"] = pd.to_numeric(semas["위도"], errors="coerce")
-    return semas
+    grp = key_cols + ["상권업종대분류명", "상권업종중분류명"]
+    counts_df = (pd.concat(cnt_frames, ignore_index=True)
+                 .groupby(grp)["점포수"].sum().reset_index())
+    map_df    = pd.concat(map_frames, ignore_index=True) if map_frames else pd.DataFrame()
+    dong_df   = (pd.concat(dong_frames, ignore_index=True)
+                 .groupby(key_cols + ["상권업종대분류명","상권업종중분류명","상권업종소분류명"])
+                 ["점포수"].sum().reset_index())
+
+    return {"counts": counts_df, "map": map_df, "dong": dong_df}
 
 
 def build_admin_maps(admin_df):
@@ -1810,76 +1833,82 @@ with tab_semas:
             )
 
     if zip_exists or csv_exists:
-        if "semas_df" not in st.session_state:
-            with st.spinner("상권 데이터 로딩 중... (최초 1회, 잠시 기다려 주세요)"):
-                st.session_state["semas_df"] = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
-        semas_df = st.session_state["semas_df"]
+        if "semas_data" not in st.session_state:
+            with st.spinner("상권 데이터 집계 중... (최초 1회, 잠시 기다려 주세요)"):
+                st.session_state["semas_data"] = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+        semas_data = st.session_state.get("semas_data", {})
+    else:
+        semas_data = {}
 
-    if (zip_exists or csv_exists) and not semas_df.empty:
+    if semas_data:
+        sm_counts = semas_data["counts"]   # 시도명, 시군구명, 행정동명, 상권업종대분류명, 상권업종중분류명, 점포수
+        sm_map    = semas_data["map"]       # 상호명, 상권업종대분류명, 상권업종중분류명, 행정동명, 경도, 위도
+        sm_dong   = semas_data["dong"]      # + 상권업종소분류명
+
         # ── 공통 필터 ─────────────────────────────────────────
-        sido_list = sorted(semas_df["시도명"].dropna().unique())
+        sido_list = sorted(sm_counts["시도명"].dropna().unique())
         sc1, sc2, sc3 = st.columns(3)
         with sc1:
             sel_sido = st.selectbox("시/도 선택", ["전체"] + sido_list, key="sm_sido")
         with sc2:
             if sel_sido != "전체":
-                gu_pool = sorted(semas_df[semas_df["시도명"] == sel_sido]["시군구명"].dropna().unique())
+                gu_pool = sorted(sm_counts[sm_counts["시도명"] == sel_sido]["시군구명"].dropna().unique())
             else:
-                gu_pool = sorted(semas_df["시군구명"].dropna().unique())
+                gu_pool = sorted(sm_counts["시군구명"].dropna().unique())
             sel_gu = st.selectbox("시/군/구 선택", ["전체"] + gu_pool, key="sm_gu")
         with sc3:
             if sel_gu != "전체":
-                dong_pool = sorted(semas_df[semas_df["시군구명"] == sel_gu]["행정동명"].dropna().unique())
+                dong_pool = sorted(sm_counts[sm_counts["시군구명"] == sel_gu]["행정동명"].dropna().unique())
             elif sel_sido != "전체":
-                dong_pool = sorted(semas_df[semas_df["시도명"] == sel_sido]["행정동명"].dropna().unique())
+                dong_pool = sorted(sm_counts[sm_counts["시도명"] == sel_sido]["행정동명"].dropna().unique())
             else:
                 dong_pool = []
             sel_dong = st.selectbox("행정동 선택", ["전체"] + dong_pool, key="sm_dong")
 
-        # 필터 적용
-        sm = semas_df.copy()
-        if sel_sido != "전체":
-            sm = sm[sm["시도명"] == sel_sido]
-        if sel_gu != "전체":
-            sm = sm[sm["시군구명"] == sel_gu]
-        if sel_dong != "전체":
-            sm = sm[sm["행정동명"] == sel_dong]
+        def _sm_filter(tbl):
+            t = tbl
+            if sel_sido != "전체" and "시도명" in t.columns:
+                t = t[t["시도명"] == sel_sido]
+            if sel_gu != "전체" and "시군구명" in t.columns:
+                t = t[t["시군구명"] == sel_gu]
+            if sel_dong != "전체" and "행정동명" in t.columns:
+                t = t[t["행정동명"] == sel_dong]
+            return t
 
-        sm_biz1_list = sorted(sm["상권업종대분류명"].dropna().unique())
-        sel_biz1 = st.selectbox(
-            "업종 대분류 (전체 기능에 적용)",
-            ["전체"] + sm_biz1_list, key="sm_biz1"
-        )
+        sm_f = _sm_filter(sm_counts)
+        biz1_list = sorted(sm_f["상권업종대분류명"].dropna().unique())
+        sel_biz1 = st.selectbox("업종 대분류 (전체 기능에 적용)",
+                                ["전체"] + biz1_list, key="sm_biz1")
         if sel_biz1 != "전체":
-            sm = sm[sm["상권업종대분류명"] == sel_biz1]
+            sm_f = sm_f[sm_f["상권업종대분류명"] == sel_biz1]
 
-        st.caption(f"현재 조건 점포 수: **{len(sm):,}개**")
+        st.caption(f"현재 조건 점포 수: **{int(sm_f['점포수'].sum()):,}개**")
         st.divider()
 
         # ══════════════════════════════════════════════════════
         # [기능 1] 상권 밀집도 지도
         # ══════════════════════════════════════════════════════
         st.markdown("#### 🗺️ 상권 밀집도 지도")
-        st.caption("점포 위치를 지도에 표시합니다. 색상은 업종 대분류를 나타냅니다.")
+        st.caption("점포 샘플을 지도에 표시합니다. 색상은 업종 대분류를 나타냅니다.")
 
-        map_sample = sm.dropna(subset=["경도","위도"])
-        if len(map_sample) > 5000:
-            map_sample = map_sample.sample(5000, random_state=42)
+        map_f = sm_map.copy()
+        if sel_dong != "전체":
+            map_f = map_f[map_f["행정동명"] == sel_dong]
+        if sel_biz1 != "전체":
+            map_f = map_f[map_f["상권업종대분류명"] == sel_biz1]
 
-        if map_sample.empty:
+        if map_f.empty:
             st.info("지도에 표시할 좌표 데이터가 없습니다.")
         else:
-            center_lat = map_sample["위도"].mean()
-            center_lon = map_sample["경도"].mean()
-
-            # 업종별 색상
-            biz_cats = map_sample["상권업종대분류명"].dropna().unique().tolist()
+            center_lat = map_f["위도"].mean()
+            center_lon = map_f["경도"].mean()
+            biz_cats = map_f["상권업종대분류명"].dropna().unique().tolist()
             palette = px.colors.qualitative.Safe
             color_map = {cat: palette[i % len(palette)] for i, cat in enumerate(biz_cats)}
 
             fig_map = go.Figure()
             for cat in biz_cats:
-                sub = map_sample[map_sample["상권업종대분류명"] == cat]
+                sub = map_f[map_f["상권업종대분류명"] == cat]
                 fig_map.add_trace(go.Scattermapbox(
                     lat=sub["위도"], lon=sub["경도"],
                     mode="markers",
@@ -1902,8 +1931,7 @@ with tab_semas:
                 legend=dict(orientation="v", x=0, y=1, bgcolor="rgba(0,0,0,0)"),
             )
             st.plotly_chart(fig_map, use_container_width=True)
-            if len(sm) > 5000:
-                st.caption(f"⚠️ 지도에는 성능을 위해 무작위 5,000개만 표시됩니다. (전체 {len(sm):,}개)")
+            st.caption(f"⚠️ 지도는 전체의 일부 샘플만 표시됩니다. (표시 수: {len(map_f):,}개)")
 
         st.divider()
 
@@ -1913,48 +1941,38 @@ with tab_semas:
         st.markdown("#### ⚔️ 업종별 경쟁 강도 분석")
         st.caption("행정동 단위로 같은 업종(중분류)이 몇 개나 밀집해 있는지 경쟁 강도를 보여줍니다.")
 
-        comp_biz2_list = sorted(sm["상권업종중분류명"].dropna().unique())
+        comp_biz2_list = sorted(sm_f["상권업종중분류명"].dropna().unique())
         comp_col1, comp_col2 = st.columns(2)
         with comp_col1:
             comp_biz2 = st.selectbox("분석할 업종 (중분류)", comp_biz2_list, key="sm_comp_biz2")
         with comp_col2:
             comp_top_n = st.slider("상위 행정동 수", 5, 30, 15, key="sm_comp_n")
 
-        comp_df = sm[sm["상권업종중분류명"] == comp_biz2].copy()
+        comp_df = sm_f[sm_f["상권업종중분류명"] == comp_biz2]
         if comp_df.empty:
             st.info("선택한 업종의 데이터가 없습니다.")
         else:
-            comp_by_dong = (
-                comp_df.groupby(["시도명","시군구명","행정동명"])
-                .size().reset_index(name="점포수")
-                .sort_values("점포수", ascending=False)
-                .head(comp_top_n)
-            )
+            comp_by_dong = (comp_df.groupby(["시군구명","행정동명"])["점포수"]
+                            .sum().reset_index()
+                            .sort_values("점포수", ascending=False).head(comp_top_n))
             comp_by_dong["지역"] = comp_by_dong["시군구명"] + " " + comp_by_dong["행정동명"]
 
             fig_comp = go.Figure(go.Bar(
-                x=comp_by_dong["점포수"],
-                y=comp_by_dong["지역"],
-                orientation="h",
-                marker_color="#f78166",
-                text=comp_by_dong["점포수"],
-                textposition="outside",
+                x=comp_by_dong["점포수"], y=comp_by_dong["지역"],
+                orientation="h", marker_color="#f78166",
+                text=comp_by_dong["점포수"], textposition="outside",
                 hovertemplate="%{y}: %{x}개<extra></extra>",
             ))
             fig_comp.update_layout(
-                xaxis_title="점포 수",
-                yaxis=dict(autorange="reversed"),
-                height=max(300, comp_top_n * 26),
-                margin=dict(t=20, b=40, r=80),
+                xaxis_title="점포 수", yaxis=dict(autorange="reversed"),
+                height=max(300, comp_top_n * 26), margin=dict(t=20, b=40, r=80),
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
-            # 전국 동일 업종 총계 요약
-            total_comp = sm[sm["상권업종중분류명"] == comp_biz2]
-            avg_per_dong = total_comp.groupby("행정동명").size().mean()
+            dong_cnt = comp_df.groupby("행정동명")["점포수"].sum()
             cx1, cx2, cx3 = st.columns(3)
-            cx1.metric(f"'{comp_biz2}' 총 점포 수", f"{len(total_comp):,}개")
-            cx2.metric("행정동 평균 점포 수", f"{avg_per_dong:.1f}개")
+            cx1.metric(f"'{comp_biz2}' 총 점포 수", f"{int(comp_df['점포수'].sum()):,}개")
+            cx2.metric("행정동 평균 점포 수", f"{dong_cnt.mean():.1f}개")
             cx3.metric("1위 동네 점포 수", f"{comp_by_dong['점포수'].iloc[0]:,}개")
 
         st.divider()
@@ -1968,18 +1986,16 @@ with tab_semas:
             "(유동인구 데이터가 로드된 경우에만 작동합니다)"
         )
 
-        rec_biz2_list = sorted(semas_df["상권업종중분류명"].dropna().unique())
+        rec_biz2_list = sorted(sm_counts["상권업종중분류명"].dropna().unique())
         rec_col1, rec_col2 = st.columns(2)
         with rec_col1:
             rec_biz2 = st.selectbox("창업 희망 업종 (중분류)", rec_biz2_list, key="sm_rec_biz2")
         with rec_col2:
             rec_top_n = st.slider("추천 지역 수", 5, 20, 10, key="sm_rec_n")
 
-        # 업종별 행정동 점포 수
-        rec_store_cnt = (
-            semas_df[semas_df["상권업종중분류명"] == rec_biz2]
-            .groupby("행정동명").size().reset_index(name="점포수")
-        )
+        rec_scope = _sm_filter(sm_counts)
+        rec_store_cnt = (rec_scope[rec_scope["상권업종중분류명"] == rec_biz2]
+                         .groupby("행정동명")["점포수"].sum().reset_index())
 
         fp_data_rec = st.session_state.get("fp_data", {})
         fp_available = bool(fp_data_rec) and "age" in fp_data_rec
@@ -1987,70 +2003,46 @@ with tab_semas:
         if fp_available:
             fp_dong_pop = (
                 fp_data_rec["age"][fp_data_rec["age"]["FORN_GB"] == "N"]
-                .groupby("ADMI_NM")["TOTAL_CNT"].mean()
-                .reset_index()
+                .groupby("ADMI_NM")["TOTAL_CNT"].mean().reset_index()
                 .rename(columns={"ADMI_NM": "행정동명", "TOTAL_CNT": "평균유동인구"})
             )
             rec_merged = pd.merge(rec_store_cnt, fp_dong_pop, on="행정동명", how="inner")
             if rec_merged.empty:
-                st.info("유동인구와 상가 데이터가 겹치는 행정동이 없습니다. (지역이 다를 수 있습니다)")
+                st.info("유동인구와 상가 데이터가 겹치는 행정동이 없습니다.")
             else:
                 rec_merged["유동인구/점포"] = (
-                    rec_merged["평균유동인구"] / rec_merged["점포수"].clip(lower=1)
-                ).round(1)
+                    rec_merged["평균유동인구"] / rec_merged["점포수"].clip(lower=1)).round(1)
                 rec_result = rec_merged.sort_values("유동인구/점포", ascending=False).head(rec_top_n)
-
                 fig_rec = go.Figure(go.Bar(
-                    x=rec_result["유동인구/점포"],
-                    y=rec_result["행정동명"],
+                    x=rec_result["유동인구/점포"], y=rec_result["행정동명"],
                     orientation="h",
-                    marker=dict(
-                        color=rec_result["유동인구/점포"],
-                        colorscale="Greens", showscale=True,
-                        colorbar=dict(title="유동인구/점포"),
-                    ),
-                    hovertemplate=(
-                        "%{y}<br>유동인구/점포: %{x:,.1f}<br>"
-                        "<extra></extra>"
-                    ),
-                    customdata=rec_result[["점포수","평균유동인구"]].values,
+                    marker=dict(color=rec_result["유동인구/점포"],
+                                colorscale="Greens", showscale=True,
+                                colorbar=dict(title="유동인구/점포")),
+                    hovertemplate="%{y}<br>유동인구/점포: %{x:,.1f}<extra></extra>",
                 ))
                 fig_rec.update_layout(
                     xaxis_title="유동인구 / 점포 수 (높을수록 유망)",
                     yaxis=dict(autorange="reversed"),
-                    height=max(300, rec_top_n * 30),
-                    margin=dict(t=20, b=40, r=80),
+                    height=max(300, rec_top_n * 30), margin=dict(t=20, b=40, r=80),
                 )
                 st.plotly_chart(fig_rec, use_container_width=True)
-
-                rec_result_show = rec_result.copy()
-                rec_result_show.columns = ["행정동명","점포수","평균유동인구","유동인구/점포비율"]
-                rec_result_show["평균유동인구"] = rec_result_show["평균유동인구"].round(0).astype(int)
-                st.dataframe(rec_result_show.reset_index(drop=True), use_container_width=True)
+                rec_show = rec_result.copy()
+                rec_show.columns = ["행정동명","점포수","평균유동인구","유동인구/점포비율"]
+                rec_show["평균유동인구"] = rec_show["평균유동인구"].round(0).astype(int)
+                st.dataframe(rec_show.reset_index(drop=True), use_container_width=True)
         else:
-            # 유동인구 없으면 점포 수 역순(경쟁 적은 곳)만 보여줌
             st.info("유동인구 데이터가 없어 점포 수가 적은 행정동(경쟁 약한 지역)으로 대체 추천합니다.")
-            rec_scope = semas_df.copy()
-            if sel_sido != "전체":
-                rec_scope = rec_scope[rec_scope["시도명"] == sel_sido]
-            if sel_gu != "전체":
-                rec_scope = rec_scope[rec_scope["시군구명"] == sel_gu]
-            rec_low = (
-                rec_scope[rec_scope["상권업종중분류명"] == rec_biz2]
-                .groupby(["시군구명","행정동명"]).size().reset_index(name="점포수")
-                .sort_values("점포수").head(rec_top_n)
-            )
-            rec_low["지역"] = rec_low["시군구명"] + " " + rec_low["행정동명"]
+            rec_low = rec_store_cnt.sort_values("점포수").head(rec_top_n)
             fig_rec2 = go.Figure(go.Bar(
-                x=rec_low["점포수"], y=rec_low["지역"],
+                x=rec_low["점포수"], y=rec_low["행정동명"],
                 orientation="h", marker_color="#3fb950",
                 hovertemplate="%{y}: %{x}개<extra></extra>",
             ))
             fig_rec2.update_layout(
                 xaxis_title="점포 수 (적을수록 경쟁 약함)",
                 yaxis=dict(autorange="reversed"),
-                height=max(300, rec_top_n * 26),
-                margin=dict(t=20, b=40, r=80),
+                height=max(300, rec_top_n * 26), margin=dict(t=20, b=40, r=80),
             )
             st.plotly_chart(fig_rec2, use_container_width=True)
 
@@ -2060,36 +2052,39 @@ with tab_semas:
         # [기능 4] 주변 상권 검색 (행정동 상권 생태계)
         # ══════════════════════════════════════════════════════
         st.markdown("#### 🔍 주변 상권 검색")
-        st.caption("행정동을 선택하면 해당 동네의 업종 구성과 점포 목록을 한눈에 확인할 수 있습니다.")
+        st.caption("행정동을 선택하면 해당 동네의 업종 구성을 한눈에 확인할 수 있습니다.")
 
         srch_sido = st.selectbox("시/도", sido_list, key="srch_sido")
-        srch_gu_pool = sorted(semas_df[semas_df["시도명"] == srch_sido]["시군구명"].dropna().unique())
-        srch_gu = st.selectbox("시/군/구", srch_gu_pool, key="srch_gu")
-        srch_dong_pool = sorted(
-            semas_df[(semas_df["시도명"] == srch_sido) & (semas_df["시군구명"] == srch_gu)]["행정동명"].dropna().unique()
-        )
-        srch_dong = st.selectbox("행정동", srch_dong_pool, key="srch_dong")
+        srch_gu_pool = sorted(sm_dong[sm_dong["시도명"] == srch_sido]["시군구명"].dropna().unique())
+        srch_gu = st.selectbox("시/군/구", srch_gu_pool, key="srch_gu") if srch_gu_pool else None
+        if srch_gu:
+            srch_dong_pool = sorted(
+                sm_dong[(sm_dong["시도명"] == srch_sido) & (sm_dong["시군구명"] == srch_gu)]["행정동명"].dropna().unique()
+            )
+            srch_dong_sel = st.selectbox("행정동", srch_dong_pool, key="srch_dong") if srch_dong_pool else None
+        else:
+            srch_dong_sel = None
 
-        srch_df = semas_df[
-            (semas_df["시도명"] == srch_sido) &
-            (semas_df["시군구명"] == srch_gu) &
-            (semas_df["행정동명"] == srch_dong)
-        ]
+        if srch_dong_sel:
+            srch_df = sm_dong[
+                (sm_dong["시도명"] == srch_sido) &
+                (sm_dong["시군구명"] == srch_gu) &
+                (sm_dong["행정동명"] == srch_dong_sel)
+            ]
+        else:
+            srch_df = pd.DataFrame()
 
         if srch_df.empty:
             st.info("해당 행정동의 상권 데이터가 없습니다.")
         else:
-            sr1, sr2 = st.columns([1, 1])
-
+            sr1, sr2 = st.columns(2)
             with sr1:
                 st.markdown("##### 업종 대분류 구성")
-                pie_data = srch_df["상권업종대분류명"].value_counts().reset_index()
-                pie_data.columns = ["업종", "점포수"]
+                pie_data = (srch_df.groupby("상권업종대분류명")["점포수"].sum()
+                            .reset_index().rename(columns={"상권업종대분류명":"업종"}))
                 fig_pie = go.Figure(go.Pie(
-                    labels=pie_data["업종"],
-                    values=pie_data["점포수"],
-                    hole=0.4,
-                    marker_colors=px.colors.qualitative.Safe,
+                    labels=pie_data["업종"], values=pie_data["점포수"],
+                    hole=0.4, marker_colors=px.colors.qualitative.Safe,
                     hovertemplate="%{label}: %{value}개 (%{percent})<extra></extra>",
                 ))
                 fig_pie.update_layout(height=340, margin=dict(t=10, b=10))
@@ -2097,40 +2092,21 @@ with tab_semas:
 
             with sr2:
                 st.markdown("##### 업종 중분류 TOP 15")
-                mid_cnt = (
-                    srch_df["상권업종중분류명"].value_counts()
-                    .head(15).reset_index()
-                )
+                mid_cnt = (srch_df.groupby("상권업종중분류명")["점포수"].sum()
+                           .sort_values(ascending=False).head(15).reset_index())
                 mid_cnt.columns = ["업종(중분류)", "점포수"]
                 fig_mid = go.Figure(go.Bar(
-                    x=mid_cnt["점포수"],
-                    y=mid_cnt["업종(중분류)"],
-                    orientation="h",
-                    marker_color="#58a6ff",
+                    x=mid_cnt["점포수"], y=mid_cnt["업종(중분류)"],
+                    orientation="h", marker_color="#58a6ff",
                     hovertemplate="%{y}: %{x}개<extra></extra>",
                 ))
                 fig_mid.update_layout(
-                    xaxis_title="점포 수",
-                    yaxis=dict(autorange="reversed"),
-                    height=340,
-                    margin=dict(t=10, b=10, r=60),
+                    xaxis_title="점포 수", yaxis=dict(autorange="reversed"),
+                    height=340, margin=dict(t=10, b=10, r=60),
                 )
                 st.plotly_chart(fig_mid, use_container_width=True)
 
-            # 요약 메트릭
             m1, m2, m3 = st.columns(3)
-            m1.metric("총 점포 수", f"{len(srch_df):,}개")
+            m1.metric("총 점포 수", f"{int(srch_df['점포수'].sum()):,}개")
             m2.metric("업종 대분류 종류", f"{srch_df['상권업종대분류명'].nunique()}개")
             m3.metric("업종 중분류 종류", f"{srch_df['상권업종중분류명'].nunique()}개")
-
-            st.markdown("##### 점포 목록")
-            show_cols = ["상호명","상권업종대분류명","상권업종중분류명","상권업종소분류명","도로명주소"] \
-                if "도로명주소" in srch_df.columns else \
-                ["상호명","상권업종대분류명","상권업종중분류명","상권업종소분류명"]
-            # 도로명주소가 semas_df에 없으므로 안전하게 처리
-            available = [c for c in show_cols if c in srch_df.columns]
-            st.dataframe(
-                srch_df[available].reset_index(drop=True),
-                use_container_width=True,
-                height=300,
-            )
