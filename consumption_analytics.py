@@ -573,9 +573,12 @@ def plot_day_hour_heatmap(df):
 
 def plot_biz_hour_heatmap(df, top_n=10):
     _apply_korean_font()
-    top_biz = (df.groupby("card_tpbuz_nm_2")["amt"]
+    top_biz = (df.groupby("card_tpbuz_nm_2", observed=True)["amt"]
                .sum().sort_values(ascending=False).head(top_n).index)
-    pivot = pd.pivot_table(df[df["card_tpbuz_nm_2"].isin(top_biz)],
+    filtered = df[df["card_tpbuz_nm_2"].isin(top_biz)].copy()
+    filtered["card_tpbuz_nm_2"] = filtered["card_tpbuz_nm_2"].astype(str)
+    filtered["hour_label"] = filtered["hour_label"].astype(str)
+    pivot = pd.pivot_table(filtered,
                            index="card_tpbuz_nm_2", columns="hour_label",
                            values="amt", aggfunc="sum", fill_value=0)
     pivot = pivot.reindex(columns=list(HOUR_MAP.values()))
