@@ -181,33 +181,53 @@ def _is_valid_zip(path):
 
 def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
                      expected_mb: float = 500):
-    """Google Drive 대용량 파일 다운로드. requests → curl 순서로 시도."""
+    """Google Drive 대용량 파일 다운로드. wget → curl → requests 순서로 시도."""
     import subprocess, shutil
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
-    # --- 방법 1: curl (리다이렉트/쿠키 처리가 Python requests보다 안정적) ---
-    curl_bin = shutil.which("curl")
-    if curl_bin:
-        url = (
-            f"https://drive.google.com/uc?export=download"
-            f"&id={file_id}&confirm=t&uuid=1"
-        )
-        progress = st.progress(0.0, text=f"{label} 다운로드 중 (curl)...")
+    dl_url = (
+        f"https://drive.usercontent.google.com/download"
+        f"?id={file_id}&export=download&confirm=t"
+    )
+
+    # --- 방법 1: wget (쿠키+리다이렉트 자동 처리) ---
+    wget_bin = shutil.which("wget")
+    if wget_bin:
+        progress = st.progress(0.0, text=f"{label} 다운로드 중 (wget)...")
         proc = subprocess.run(
-            [curl_bin, "-L", "--silent", "--show-error",
-             "-o", output_path, url],
-            capture_output=True, text=True, timeout=600,
+            [wget_bin, "--no-check-certificate", "-q",
+             "-O", output_path, dl_url],
+            capture_output=True, text=True, timeout=1200,
         )
         progress.empty()
         if proc.returncode == 0 and os.path.exists(output_path):
             size = os.path.getsize(output_path)
             if size >= 1024 * 100:
                 return
-            # 0 bytes 또는 HTML → 삭제 후 방법 2로 fallback
             os.remove(output_path)
-            st.warning(f"curl 다운로드 실패 (size={size}). requests로 재시도...")
+            st.warning(f"wget 실패 (size={size})")
         else:
-            st.warning(f"curl 오류: {proc.stderr[:200]}. requests로 재시도...")
+            st.warning(f"wget 오류: {proc.stderr[:300]}")
+
+    # --- 방법 2: curl ---
+    curl_bin = shutil.which("curl")
+    if curl_bin:
+        progress = st.progress(0.0, text=f"{label} 다운로드 중 (curl)...")
+        proc = subprocess.run(
+            [curl_bin, "-L", "--silent", "--show-error",
+             "-o", output_path, dl_url],
+            capture_output=True, text=True, timeout=1200,
+        )
+        progress.empty()
+        if proc.returncode == 0 and os.path.exists(output_path):
+            size = os.path.getsize(output_path)
+            if size >= 1024 * 100:
+                return
+            os.remove(output_path)
+            st.warning(f"curl 실패 (size={size}). Content 헤더: "
+                       + proc.stderr[:200])
+        else:
+            st.warning(f"curl 오류: {proc.stderr[:200]}")
 
     # --- 방법 2: requests + usercontent 도메인 ---
     import requests
@@ -971,6 +991,32 @@ if "df" not in st.session_state:
     with col_btn:
         st.markdown("<br>", unsafe_allow_html=True)
         load_btn = st.button("📥 데이터 로드", type="primary", key="load_month_btn")
+
+    # 네트워크 디버그 버튼
+    if st.button("🔍 네트워크 연결 테스트", key="net_test_btn"):
+        import requests, subprocess, shutil
+        st.write("**외부 URL 연결 테스트**")
+        test_url = "https://drive.usercontent.google.com/download?id=1xVViEFEElWSYcQQp4R3qOi8yChzmvTuR&export=download&confirm=t"
+        try:
+            r = requests.head(test_url, timeout=15, allow_redirects=True)
+            st.write(f"- HEAD 상태코드: {r.status_code}")
+            st.write(f"- Content-Type: {r.headers.get('Content-Type')}")
+            st.write(f"- Content-Length: {r.headers.get('Content-Length', '없음')}")
+            st.write(f"- Transfer-Encoding: {r.headers.get('Transfer-Encoding', '없음')}")
+        except Exception as e:
+            st.write(f"- HEAD 오류: {e}")
+        # wget 존재 여부
+        st.write(f"- wget: {shutil.which('wget')}")
+        st.write(f"- curl: {shutil.which('curl')}")
+        # curl verbose test (첫 500자만)
+        curl_bin = shutil.which("curl")
+        if curl_bin:
+            proc = subprocess.run(
+                [curl_bin, "-v", "--silent", "--max-time", "10",
+                 "-o", "/dev/null", test_url],
+                capture_output=True, text=True, timeout=15,
+            )
+            st.code(proc.stderr[:800], language="text")
 
     if load_btn:
         zip_ok = ensure_main_zip()
