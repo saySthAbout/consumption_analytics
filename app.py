@@ -1397,7 +1397,7 @@ with tab_ov:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("총 거래 건수",   f"{df.shape[0]:,}")
     c2.metric("데이터 항목 수", f"{df.shape[1]:,}")
-    c3.metric("총 매출액",      f"{df['amt'].sum():,.0f}원")
+    c3.metric("총 매출액",      f"{df['amt'].sum():,.0f}원" if "amt" in df.columns else "-")
     c4.metric("행정동 수",      f"{len(admin_name_to_code)}개")
 
     if not admin_ok:
