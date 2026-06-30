@@ -1,5 +1,7 @@
+import io
 import os
 import glob
+import zipfile
 import warnings
 from io import BytesIO
 
@@ -872,38 +874,71 @@ use_log_target  = True
 remove_outliers = True
 model_name      = "LightGBM"
 
-# ── 매출 데이터 로드 (월 선택 후 사이드바 버튼으로 로드) ──
-st.sidebar.markdown("---")
-st.sidebar.markdown("**📅 데이터 월 선택**")
-selected_yyyymm = st.sidebar.selectbox(
-    "조회 월",
-    AVAILABLE_YYYYMM,
-    format_func=lambda x: YYYYMM_LABEL[x],
-    index=len(AVAILABLE_YYYYMM) - 1,  # 기본: 최신월(202603)
-    key="selected_yyyymm",
-)
-load_btn = st.sidebar.button("📥 해당 월 데이터 로드", type="primary", key="load_month_btn")
+# ── 매출 데이터 로드 (메인 화면 버튼으로 온디맨드 로드) ──
+loaded_yyyymm = st.session_state.get("loaded_yyyymm")
 
-if load_btn or "df" not in st.session_state or st.session_state.get("loaded_yyyymm") != selected_yyyymm:
-    zip_ok = ensure_main_zip()
-    if not zip_ok:
-        st.error("데이터 ZIP 다운로드 실패. 네트워크를 확인해주세요.")
-        st.stop()
-    try:
-        with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
-            raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
-            st.session_state["df"]            = preprocess_data(raw_df)
-            st.session_state["loaded_yyyymm"] = selected_yyyymm
-            st.session_state["sales_enc"]     = sales_enc
-            st.session_state["sales_path"]    = sales_path
-    except Exception as e:
-        st.error(f"매출 데이터 로드 실패: {e}")
-        st.stop()
+if "df" not in st.session_state:
+    # 데이터 미로드 → 메인 화면에 로드 UI 표시
+    st.markdown("---")
+    st.markdown("### 📅 분석할 월을 선택하세요")
+    col_sel, col_btn = st.columns([2, 1])
+    with col_sel:
+        selected_yyyymm = st.selectbox(
+            "조회 월",
+            AVAILABLE_YYYYMM,
+            format_func=lambda x: YYYYMM_LABEL[x],
+            index=len(AVAILABLE_YYYYMM) - 1,
+            key="selected_yyyymm",
+        )
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        load_btn = st.button("📥 데이터 로드", type="primary", key="load_month_btn")
+
+    if load_btn:
+        zip_ok = ensure_main_zip()
+        if not zip_ok:
+            st.error("데이터 ZIP 다운로드 실패. 네트워크를 확인해주세요.")
+        else:
+            try:
+                with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
+                    raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
+                    st.session_state["df"]            = preprocess_data(raw_df)
+                    st.session_state["loaded_yyyymm"] = selected_yyyymm
+                    st.session_state["sales_enc"]     = sales_enc
+                    st.session_state["sales_path"]    = sales_path
+                st.rerun()
+            except Exception as e:
+                st.error(f"매출 데이터 로드 실패: {e}")
+    st.stop()
 
 df         = st.session_state["df"]
 sales_enc  = st.session_state.get("sales_enc", "-")
 sales_path = st.session_state.get("sales_path", "-")
-st.sidebar.success(f"로드됨: {YYYYMM_LABEL[st.session_state['loaded_yyyymm']]}")
+loaded_yyyymm = st.session_state["loaded_yyyymm"]
+
+# 사이드바: 월 변경 버튼
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**📅 데이터: {YYYYMM_LABEL[loaded_yyyymm]}**")
+selected_yyyymm = st.sidebar.selectbox(
+    "월 변경",
+    AVAILABLE_YYYYMM,
+    format_func=lambda x: YYYYMM_LABEL[x],
+    index=AVAILABLE_YYYYMM.index(loaded_yyyymm),
+    key="selected_yyyymm",
+)
+if st.sidebar.button("🔄 변경", key="change_month_btn") and selected_yyyymm != loaded_yyyymm:
+    zip_ok = ensure_main_zip()
+    if zip_ok:
+        try:
+            with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
+                raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
+                st.session_state["df"]            = preprocess_data(raw_df)
+                st.session_state["loaded_yyyymm"] = selected_yyyymm
+                st.session_state["sales_enc"]     = sales_enc
+                st.session_state["sales_path"]    = sales_path
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"로드 실패: {e}")
 
 # ── 행정동 코드 로드 (없어도 앱 계속 동작) ─────────────
 try:
