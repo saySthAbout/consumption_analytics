@@ -2331,15 +2331,11 @@ with tab_semas:
     zip_exists = os.path.exists(SEMAS_ZIP_PATH)
     csv_exists = bool(glob.glob(os.path.join(SEMAS_DIR, "semas_store_info_*.csv")))
     if not zip_exists and not csv_exists:
-        if SEMAS_GDRIVE_FILE_ID:
-            if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
-                _gdrive_download(SEMAS_GDRIVE_FILE_ID, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)")
+        if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
+            if _hf_download(SEMAS_ZIP_NAME, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)"):
                 st.rerun()
-        else:
-            st.warning(
-                "`dataset/semas_store_info_202603.zip` 파일을 찾을 수 없습니다. "
-                "`SEMAS_GDRIVE_FILE_ID`를 코드에 입력해 주세요."
-            )
+            else:
+                st.error("상권 데이터 다운로드에 실패했습니다. 잠시 후 다시 시도해주세요.")
 
     if zip_exists or csv_exists:
         if "semas_data" not in st.session_state:
