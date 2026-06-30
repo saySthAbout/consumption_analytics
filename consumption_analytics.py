@@ -296,18 +296,22 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
 
 
 
+def _extract_cd_fname(headers, file_id: str) -> str:
+    import re
+    cd = headers.get("Content-Disposition", "")
+    m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
+    return m.group(1).strip() if m else f"card_{file_id}.csv"
+
+
 def _download_gdrive_csv(file_id: str, dest_dir: str) -> str | None:
     """Drive 파일을 Content-Disposition 파일명으로 dest_dir에 저장. 저장된 경로 반환."""
-    import requests, re
+    import requests
     url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
     try:
         resp = requests.get(url, stream=True, timeout=120, allow_redirects=True,
                             headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
-        # 파일명 추출
-        cd = resp.headers.get("Content-Disposition", "")
-        m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
-        fname = m.group(1).strip() if m else f"card_{file_id}.csv"
+        fname = _extract_cd_fname(resp.headers, file_id)
         out = os.path.join(dest_dir, fname)
         size = 0
         with open(out, "wb") as f:
@@ -315,9 +319,13 @@ def _download_gdrive_csv(file_id: str, dest_dir: str) -> str | None:
                 if chunk:
                     f.write(chunk)
                     size += len(chunk)
-        if size < 1024:  # 너무 작으면 HTML 오류 페이지
+        if size < 1024:
             os.remove(out)
             return None
+        # 다운로드 성공 → 파일명→ID 맵 업데이트
+        fmap = st.session_state.get("_fileid_map", {})
+        fmap[fname] = file_id
+        st.session_state["_fileid_map"] = fmap
         return out
     except Exception:
         return None
@@ -471,35 +479,37 @@ CITY_KO_TO_EN: dict[str, str] = {
 
 
 def _build_fileid_map() -> dict[str, str]:
-    """파일명 → file_id 매핑을 병렬 Range 헤더 요청으로 빌드 (파일 본문 미다운로드)."""
-    cached = st.session_state.get("_fileid_map")
-    if cached:
-        return cached
+    """파일명 → file_id 매핑을 병렬 GET(헤더만) 요청으로 빌드."""
+    import concurrent.futures, requests as _req
 
-    import concurrent.futures, requests as _req, re as _re
+    existing = st.session_state.get("_fileid_map", {})
+    # 이미 알고 있는 ID 제외
+    known_ids = set(existing.values())
+    pending = [fid for fid in CARD_FILE_IDS if fid not in known_ids]
+    if not pending:
+        return existing
 
-    def _head_fname(fid):
+    def _get_fname(fid):
         url = (f"https://drive.usercontent.google.com/download"
                f"?id={fid}&export=download&confirm=t")
         try:
-            r = _req.get(url, headers={"Range": "bytes=0-0",
-                                       "User-Agent": "Mozilla/5.0"},
-                         timeout=15, allow_redirects=True, stream=True)
+            r = _req.get(url, headers={"User-Agent": "Mozilla/5.0"},
+                         stream=True, timeout=15, allow_redirects=True)
+            fname = _extract_cd_fname(r.headers, fid)
             r.close()
-            cd = r.headers.get("Content-Disposition", "")
-            m = _re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)',
-                           cd, _re.IGNORECASE)
-            return fid, m.group(1).strip() if m else None
+            return fid, fname
         except Exception:
             return fid, None
 
     with st.spinner("파일 목록 확인 중... (최초 1회)"):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as ex:
-            results = list(ex.map(_head_fname, CARD_FILE_IDS))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+            results = list(ex.map(_get_fname, pending))
 
-    mapping = {fname: fid for fid, fname in results if fname}
-    st.session_state["_fileid_map"] = mapping
-    return mapping
+    for fid, fname in results:
+        if fname:
+            existing[fname] = fid
+    st.session_state["_fileid_map"] = existing
+    return existing
 
 
 def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
