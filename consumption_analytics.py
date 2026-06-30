@@ -219,54 +219,29 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
 
 
 
-def _gdrive_folder_file_ids(folder_id: str) -> dict:
-    """Drive 공개 폴더에서 {파일명: file_id} 매핑 반환 (gdown 내부 이용)."""
-    import gdown, re
-    import requests as _req
-    sess = _req.Session()
-    sess.headers["User-Agent"] = "Mozilla/5.0"
-    url = f"https://drive.google.com/drive/folders/{folder_id}"
-    html = sess.get(url, timeout=30).text
-    # gdown 4.7.3 방식: JSON 내 [name, mime, id] 패턴 추출
-    entries = re.findall(r'\["([^"]+\.csv)","[^"]*","([A-Za-z0-9_\-]{25,})"', html)
-    return {name: fid for name, fid in entries}
-
-
-def _ensure_card_csv_dir():
-    os.makedirs(CARD_CSV_DIR, exist_ok=True)
-
-
 def ensure_month_csvs(yyyymm: str) -> bool:
-    """해당 월 CSV가 없으면 Drive 폴더에서 다운로드."""
-    _ensure_card_csv_dir()
+    """해당 월 CSV가 없으면 Drive 폴더 전체를 gdown으로 다운로드 (최초 1회)."""
+    os.makedirs(CARD_CSV_DIR, exist_ok=True)
     existing = glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv"))
     if existing:
         return True
 
-    # 폴더 파일 목록 캐시 (session_state)
-    if "card_folder_map" not in st.session_state:
-        with st.spinner("Drive 폴더 파일 목록 조회 중..."):
-            st.session_state["card_folder_map"] = _gdrive_folder_file_ids(CARD_CSV_FOLDER_ID)
-    folder_map = st.session_state["card_folder_map"]
-
-    targets = {name: fid for name, fid in folder_map.items() if yyyymm in name}
-    if not targets:
-        st.error(f"Drive 폴더에 {yyyymm} 파일 없음. 폴더 목록: {list(folder_map.keys())[:5]}")
-        return False
-
-    label = YYYYMM_LABEL.get(yyyymm, yyyymm)
-    errors = []
-    with st.spinner(f"{label} 카드 데이터 다운로드 중... ({len(targets)}개 파일)"):
-        for name, fid in sorted(targets.items()):
-            out = os.path.join(CARD_CSV_DIR, name)
-            if os.path.exists(out) and os.path.getsize(out) > 1024:
-                continue
+    # 아직 한 번도 다운로드 안 된 경우 → 폴더 전체 다운로드
+    all_csvs = glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))
+    if not all_csvs:
+        import gdown
+        with st.spinner("카드 데이터 CSV 전체 다운로드 중... (최초 1회, 몇 분 소요)"):
             try:
-                _gdrive_download(fid, out, name, expected_mb=10)
+                gdown.download_folder(
+                    id=CARD_CSV_FOLDER_ID,
+                    output=CARD_CSV_DIR,
+                    quiet=False,
+                    use_cookies=False,
+                )
             except Exception as e:
-                errors.append(f"{name}: {e}")
-    if errors:
-        st.warning("일부 파일 다운로드 실패:\n" + "\n".join(errors[:5]))
+                st.error(f"폴더 다운로드 오류: {e}")
+                return False
+
     return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
 
 
