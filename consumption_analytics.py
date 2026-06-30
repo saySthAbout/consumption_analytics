@@ -1528,13 +1528,16 @@ with tab_fp:
     st.subheader("유동인구 분석")
     st.caption("행정동 단위 시간대별 유동인구 데이터를 기반으로 상권 방문 패턴을 분석합니다.")
 
+    # 다운로드는 버튼 클릭 시에만 수행 (메모리 절약)
     if not os.path.exists(FLOWPOP_ZIP_PATH):
         if FLOWPOP_GDRIVE_FILE_ID:
-            import gdown
-            os.makedirs(DATASET_DIR, exist_ok=True)
-            url = f"https://drive.google.com/uc?id={FLOWPOP_GDRIVE_FILE_ID}"
-            with st.spinner("유동인구 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회)"):
-                gdown.download(url, FLOWPOP_ZIP_PATH, quiet=False)
+            if st.button("📥 유동인구 데이터 다운로드 (최초 1회)", key="fp_download"):
+                import gdown
+                os.makedirs(DATASET_DIR, exist_ok=True)
+                url = f"https://drive.google.com/uc?id={FLOWPOP_GDRIVE_FILE_ID}"
+                with st.spinner("Google Drive에서 다운로드 중입니다... (약 85MB)"):
+                    gdown.download(url, FLOWPOP_ZIP_PATH, quiet=False)
+                st.rerun()
         else:
             st.warning(
                 f"유동인구 데이터 파일을 찾을 수 없습니다.\n\n"
@@ -1542,7 +1545,10 @@ with tab_fp:
             )
 
     if os.path.exists(FLOWPOP_ZIP_PATH):
-        fp_all = load_flowpop_data(FLOWPOP_ZIP_PATH)
+        if "fp_all" not in st.session_state:
+            with st.spinner("유동인구 데이터 로딩 중..."):
+                st.session_state["fp_all"] = load_flowpop_data(FLOWPOP_ZIP_PATH)
+        fp_all = st.session_state["fp_all"]
 
         if fp_all.empty:
             st.error("유동인구 데이터를 불러오지 못했습니다.")
@@ -1807,16 +1813,32 @@ with tab_semas:
     st.subheader("전국 상권 분석")
     st.caption("소상공인시장진흥공단 상가(상권)정보를 기반으로 업종 분포·경쟁 강도·입지 추천·주변 상권을 분석합니다.")
 
-    ensure_semas_data()
-    semas_df = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+    semas_df = pd.DataFrame()
+    # zip 없으면 다운로드 버튼 제공 (자동 다운로드 대신 명시적 액션)
+    zip_exists = os.path.exists(SEMAS_ZIP_PATH)
+    csv_exists = bool(glob.glob(os.path.join(SEMAS_DIR, "semas_store_info_*.csv")))
+    if not zip_exists and not csv_exists:
+        if SEMAS_GDRIVE_FILE_ID:
+            if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
+                import gdown
+                os.makedirs(DATASET_DIR, exist_ok=True)
+                url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
+                with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
+                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+                st.rerun()
+        else:
+            st.warning(
+                "`dataset/semas_store_info_202603.zip` 파일을 찾을 수 없습니다. "
+                "`SEMAS_GDRIVE_FILE_ID`를 코드에 입력해 주세요."
+            )
 
-    if semas_df.empty:
-        st.warning(
-            "`dataset/semas_store_info_202603.zip` 또는 CSV 파일을 찾을 수 없습니다. "
-            "Google Drive 파일 ID(`SEMAS_GDRIVE_FILE_ID`)를 코드에 입력하거나 "
-            "zip 파일을 dataset 폴더에 직접 배치해 주세요."
-        )
-    else:
+    if zip_exists or csv_exists:
+        if "semas_df" not in st.session_state:
+            with st.spinner("상권 데이터 로딩 중... (최초 1회, 잠시 기다려 주세요)"):
+                st.session_state["semas_df"] = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+        semas_df = st.session_state["semas_df"]
+
+    if (zip_exists or csv_exists) and not semas_df.empty:
         # ── 공통 필터 ─────────────────────────────────────────
         sido_list = sorted(semas_df["시도명"].dropna().unique())
         sc1, sc2, sc3 = st.columns(3)
