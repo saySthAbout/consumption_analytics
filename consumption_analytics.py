@@ -1349,7 +1349,17 @@ with tab_cluster:
         cl_day_nums = [day_rev[d] for d in cl_days]
         cl_df = cl_df[cl_df["day"].isin(cl_day_nums)]
 
-    if cl_df.empty:
+    # 필수 조건: 지역(시/구), 동네, 업종 대분류, 업종 중분류 모두 선택해야 차트 표시
+    required_selected = (
+        cl_district != "전체" and
+        cl_admi_name != "전체" and
+        cl_biz1 != "전체" and
+        cl_biz2 != "전체"
+    )
+
+    if not required_selected:
+        st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 분석 결과가 표시됩니다.")
+    elif cl_df.empty:
         st.warning("선택 조건에 해당하는 데이터가 없습니다.")
     else:
         st.caption(f"분석 데이터: {len(cl_df):,}건")
