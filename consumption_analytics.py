@@ -172,9 +172,15 @@ YYYYMM_LABEL = {
 
 
 def _is_valid_zip(path):
+    """시스템 unzip으로 ZIP 유효성 확인 (압축 방식 무관)."""
+    import subprocess
+    if not os.path.exists(path) or os.path.getsize(path) < 1024:
+        return False
     try:
-        with zipfile.ZipFile(path, "r") as zf:
-            return len(zf.namelist()) > 0
+        proc = subprocess.run(
+            ["unzip", "-t", path], capture_output=True, timeout=30
+        )
+        return proc.returncode in (0, 1)
     except Exception:
         return False
 
@@ -228,31 +234,53 @@ def ensure_main_zip():
     return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
+def _list_zip_members(zip_path: str) -> list:
+    """시스템 unzip으로 ZIP 내 파일 목록 반환 (압축 방식 무관)."""
+    import subprocess
+    proc = subprocess.run(
+        ["unzip", "-Z1", zip_path], capture_output=True, text=True
+    )
+    if proc.returncode not in (0, 1):  # 1 = warning but OK
+        raise RuntimeError(f"unzip -Z1 실패: {proc.stderr[:200]}")
+    return [l.strip() for l in proc.stdout.splitlines() if l.strip().endswith(".csv")]
+
+
+def _read_member_via_unzip(zip_path: str, member: str) -> bytes:
+    """시스템 unzip -p 로 ZIP 멤버를 메모리로 추출."""
+    import subprocess
+    proc = subprocess.run(
+        ["unzip", "-p", zip_path, member], capture_output=True, timeout=120
+    )
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"unzip -p 실패 ({member}): {proc.stderr[:200]}")
+    return proc.stdout
+
+
 def load_month_csv(yyyymm: str):
     """ZIP에서 해당 월 모든 도시 CSV를 합쳐 DataFrame으로 반환."""
     encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
-    with zipfile.ZipFile(MAIN_DATA_ZIP_PATH, "r") as zf:
-        candidates = sorted(n for n in zf.namelist() if yyyymm in n and n.endswith(".csv"))
-        if not candidates:
-            raise FileNotFoundError(
-                f"ZIP 안에 {yyyymm} 해당 파일 없음. 예시: {zf.namelist()[:5]}"
-            )
-        frames = []
-        enc_used = "utf-8-sig"
-        for name in candidates:
-            data = zf.read(name)
-            for enc in encodings:
-                try:
-                    df = pd.read_csv(io.BytesIO(data), encoding=enc, dtype=_SALES_DTYPES)
-                    enc_used = enc
-                    frames.append(df)
-                    break
-                except Exception:
-                    continue
-            else:
-                raise ValueError(f"{name} 읽기 실패")
-        raw = pd.concat(frames, ignore_index=True)
-        return raw, enc_used, candidates[0]
+    all_members = _list_zip_members(MAIN_DATA_ZIP_PATH)
+    candidates = sorted(n for n in all_members if yyyymm in n)
+    if not candidates:
+        raise FileNotFoundError(
+            f"ZIP 안에 {yyyymm} 해당 파일 없음. 예시: {all_members[:5]}"
+        )
+    frames = []
+    enc_used = "utf-8-sig"
+    for name in candidates:
+        data = _read_member_via_unzip(MAIN_DATA_ZIP_PATH, name)
+        for enc in encodings:
+            try:
+                df = pd.read_csv(io.BytesIO(data), encoding=enc, dtype=_SALES_DTYPES)
+                enc_used = enc
+                frames.append(df)
+                break
+            except Exception:
+                continue
+        else:
+            raise ValueError(f"{name} 읽기 실패")
+    raw = pd.concat(frames, ignore_index=True)
+    return raw, enc_used, candidates[0]
 
 def ensure_semas_data():
     """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
