@@ -181,10 +181,10 @@ DAY_MAP = {
     5: "금요일", 6: "토요일", 7: "일요일"
 }
 HOUR_MAP = {
-    1: "00:00~06:59", 2: "07:00~08:59", 3: "09:00~10:59",
-    4: "11:00~12:59", 5: "13:00~14:59", 6: "15:00~16:59",
-    7: "17:00~18:59", 8: "19:00~20:59", 9: "21:00~22:59",
-    10: "23:00~23:59"
+    1: "00:00 - 06:59", 2: "07:00 - 08:59", 3: "09:00 - 10:59",
+    4: "11:00 - 12:59", 5: "13:00 - 14:59", 6: "15:00 - 16:59",
+    7: "17:00 - 18:59", 8: "19:00 - 20:59", 9: "21:00 - 22:59",
+    10: "23:00 - 23:59"
 }
 SEX_MAP         = {"M": "남성", "F": "여성"}
 SEX_REVERSE_MAP = {"남성": "M", "여성": "F"}
@@ -911,7 +911,7 @@ with tab_pred:
             model, model_info = load_saved_model()
 
             # 선택 조건에 맞는 참조 데이터 필터링
-            ref = df[
+            ref_exact = df[
                 (df["card_tpbuz_nm_2"] == sel_biz2) &
                 (df["day"]   == sel_day) &
                 (df["month"] == sel_month) &
@@ -919,8 +919,8 @@ with tab_pred:
                 (df["age"]   == sel_age) &
                 (df["hour"]  == sel_hour)
             ]
-            if len(ref) < 5:
-                ref = df[df["card_tpbuz_nm_2"] == sel_biz2]
+            ref_fallback = len(ref_exact) < 5
+            ref = ref_exact if not ref_fallback else df[df["card_tpbuz_nm_2"] == sel_biz2]
 
             avg_cnt = int(round(ref["cnt"].mean())) if "cnt" in ref.columns and len(ref) > 0 else 1
             sel_cnt = avg_cnt
@@ -960,6 +960,16 @@ with tab_pred:
             if len(ref) >= 5:
                 st.divider()
                 st.markdown("#### 📊 유사 조건 소비금액 분포")
+                if ref_fallback:
+                    st.caption(
+                        f"⚠️ 선택 조건(업종·요일·월·성별·나이대·시간대 일치)으로 조회된 데이터가 5건 미만이어서 "
+                        f"**{sel_biz2} 전체** 데이터({len(ref):,}건)로 대체 표시합니다."
+                    )
+                else:
+                    st.caption(
+                        f"선택 조건과 정확히 일치하는 실제 거래 {len(ref):,}건의 소비금액 분포입니다. "
+                        f"상위 5% 극단값({fmt(ref['amt'].quantile(0.95))} 초과)은 제외하여 표시합니다."
+                    )
                 amt_clip = ref["amt"].clip(upper=ref["amt"].quantile(0.95))
                 fig_dist = go.Figure(go.Histogram(
                     x=amt_clip, nbinsx=30,
