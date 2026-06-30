@@ -1,8 +1,17 @@
 # 대용량 매출 데이터 (로컬 학습용, GitHub 미포함)
 dataset/tbsh_gyeonggi_day_*.csv
 dataset/국가데이터처_*.csv
-# SEMAS 원본 대용량 파일 제외 (집계 결과 semas_store_count.csv만 포함)
+# SEMAS 원본 대용량 파일 제외 (Drive에서 다운로드)
 dataset/Commercial\ Area\ Information*.csv
+dataset/semas_store_info_*.csv
+dataset/semas_store_info_*.zip
+
+# 노트북 및 기타 로컬 전용 파일
+*.ipynb
+ngrok/
+report.md
+dataset/경기도행정기관코드.csv
+dataset/한국수자원공사_*.csv
 
 # 학습된 모델 및 인코더는 GitHub에 포함 (Streamlit Cloud에서 로드용)
 
