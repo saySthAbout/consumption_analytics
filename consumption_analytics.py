@@ -1872,7 +1872,10 @@ with tab_ai:
     st.caption("데이터를 요약해 GPT-4o가 사장님을 위한 인사이트 리포트를 작성합니다.")
 
     # API 키: secrets 우선, 없으면 입력창
-    api_key = st.secrets.get("OPENAI_API_KEY", "") if hasattr(st, "secrets") else ""
+    try:
+        api_key = st.secrets.get("OPENAI_API_KEY", "")
+    except Exception:
+        api_key = ""
     if not api_key:
         api_key = st.text_input("OpenAI API Key", type="password",
                                 placeholder="sk-proj-...")
