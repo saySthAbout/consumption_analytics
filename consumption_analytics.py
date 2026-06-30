@@ -229,20 +229,30 @@ def ensure_main_zip():
 
 
 def load_month_csv(yyyymm: str):
-    """ZIP에서 해당 월 CSV만 추출해 DataFrame으로 반환."""
+    """ZIP에서 해당 월 모든 도시 CSV를 합쳐 DataFrame으로 반환."""
+    encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
     with zipfile.ZipFile(MAIN_DATA_ZIP_PATH, "r") as zf:
-        candidates = [n for n in zf.namelist() if yyyymm in n and n.endswith(".csv")]
+        candidates = sorted(n for n in zf.namelist() if yyyymm in n and n.endswith(".csv"))
         if not candidates:
-            raise FileNotFoundError(f"ZIP 안에 {yyyymm} 해당 파일 없음. 목록: {zf.namelist()}")
-        name = candidates[0]
-        encodings = ["utf-8-sig", "cp949", "euc-kr", "utf-8"]
-        for enc in encodings:
-            try:
-                raw = pd.read_csv(io.BytesIO(zf.read(name)), encoding=enc, dtype=_SALES_DTYPES)
-                return raw, enc, name
-            except Exception:
-                continue
-        raise ValueError(f"{name} 읽기 실패")
+            raise FileNotFoundError(
+                f"ZIP 안에 {yyyymm} 해당 파일 없음. 예시: {zf.namelist()[:5]}"
+            )
+        frames = []
+        enc_used = "utf-8-sig"
+        for name in candidates:
+            data = zf.read(name)
+            for enc in encodings:
+                try:
+                    df = pd.read_csv(io.BytesIO(data), encoding=enc, dtype=_SALES_DTYPES)
+                    enc_used = enc
+                    frames.append(df)
+                    break
+                except Exception:
+                    continue
+            else:
+                raise ValueError(f"{name} 읽기 실패")
+        raw = pd.concat(frames, ignore_index=True)
+        return raw, enc_used, candidates[0]
 
 def ensure_semas_data():
     """SEMAS zip이 없으면 Google Drive에서 다운로드 후 압축 해제."""
