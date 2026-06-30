@@ -5,6 +5,7 @@ dataset/국가데이터처_*.csv
 dataset/Commercial\ Area\ Information*.csv
 dataset/semas_store_info_*.csv
 dataset/semas_store_info_*.zip
+dataset/flowpop_admi_*.zip
 
 # 노트북 및 기타 로컬 전용 파일
 *.ipynb

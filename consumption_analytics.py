@@ -104,10 +104,8 @@ FEATURE_COLUMNS_PATH = os.path.join(ENCODER_DIR, "feature_columns.pkl")
 LSTM_MODEL_PATH      = os.path.join(MODEL_DIR,   "lstm_model.pkl")
 CLUSTER_MODEL_PATH   = os.path.join(MODEL_DIR,   "cluster_model.pkl")
 
-FLOWPOP_ZIP_PATH = os.path.join(
-    os.path.expanduser("~"), "Downloads",
-    "유동인구_행정동 단위 집계_202601-202603.zip"
-)
+FLOWPOP_ZIP_PATH     = os.path.join(DATASET_DIR, "flowpop_admi_202601-202603.zip")
+FLOWPOP_GDRIVE_FILE_ID = "1CI89pcksxhFkfkVdxnoKqvSpSKarEJ7R"
 
 SEMAS_DIR      = DATASET_DIR
 SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
@@ -1531,11 +1529,19 @@ with tab_fp:
     st.caption("행정동 단위 시간대별 유동인구 데이터를 기반으로 상권 방문 패턴을 분석합니다.")
 
     if not os.path.exists(FLOWPOP_ZIP_PATH):
-        st.warning(
-            f"유동인구 데이터 파일을 찾을 수 없습니다.\n\n"
-            f"**{FLOWPOP_ZIP_PATH}** 경로에 zip 파일을 배치해 주세요."
-        )
-    else:
+        if FLOWPOP_GDRIVE_FILE_ID:
+            import gdown
+            os.makedirs(DATASET_DIR, exist_ok=True)
+            url = f"https://drive.google.com/uc?id={FLOWPOP_GDRIVE_FILE_ID}"
+            with st.spinner("유동인구 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회)"):
+                gdown.download(url, FLOWPOP_ZIP_PATH, quiet=False)
+        else:
+            st.warning(
+                f"유동인구 데이터 파일을 찾을 수 없습니다.\n\n"
+                f"**{FLOWPOP_ZIP_PATH}** 경로에 zip 파일을 배치해 주세요."
+            )
+
+    if os.path.exists(FLOWPOP_ZIP_PATH):
         fp_all = load_flowpop_data(FLOWPOP_ZIP_PATH)
 
         if fp_all.empty:
