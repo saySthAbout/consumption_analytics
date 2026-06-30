@@ -149,9 +149,9 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
     else:
         return False
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={file_id}"
+    url = f"https://drive.google.com/uc?id={file_id}&confirm=t"
     with st.spinner(f"유동인구 데이터 ({YYYYMM_LABEL.get(yyyymm, yyyymm)}) 다운로드 중..."):
-        gdown.download(url, path, quiet=False, fuzzy=True)
+        gdown.download(url, path, quiet=False)
     return os.path.exists(path)
 
 SEMAS_DIR      = DATASET_DIR
@@ -192,9 +192,9 @@ def ensure_main_zip():
         os.remove(MAIN_DATA_ZIP_PATH)
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={MAIN_DATA_ZIP_GDRIVE_ID}"
+    url = f"https://drive.google.com/uc?id={MAIN_DATA_ZIP_GDRIVE_ID}&confirm=t"
     with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
-        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False, fuzzy=True)
+        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False)
     return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
@@ -228,9 +228,9 @@ def ensure_semas_data():
         return
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
+    url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}&confirm=t"
     with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
-        gdown.download(url, SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
+        gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
     _extract_semas_zip()
 
 
@@ -1956,9 +1956,9 @@ with tab_semas:
             if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
                 import gdown
                 os.makedirs(DATASET_DIR, exist_ok=True)
-                url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
+                url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}&confirm=t"
                 with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
-                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
+                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
                 st.rerun()
         else:
             st.warning(
