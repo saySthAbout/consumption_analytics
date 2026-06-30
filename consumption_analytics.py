@@ -296,44 +296,53 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
 
 
 
+def _download_gdrive_csv(file_id: str, dest_dir: str) -> str | None:
+    """Drive 파일을 Content-Disposition 파일명으로 dest_dir에 저장. 저장된 경로 반환."""
+    import requests, re
+    url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+    try:
+        resp = requests.get(url, stream=True, timeout=120, allow_redirects=True,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        # 파일명 추출
+        cd = resp.headers.get("Content-Disposition", "")
+        m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
+        fname = m.group(1).strip() if m else f"card_{file_id}.csv"
+        out = os.path.join(dest_dir, fname)
+        size = 0
+        with open(out, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=2 * 1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+                    size += len(chunk)
+        if size < 1024:  # 너무 작으면 HTML 오류 페이지
+            os.remove(out)
+            return None
+        return out
+    except Exception:
+        return None
+
+
 def ensure_month_csvs(yyyymm: str) -> bool:
-    """해당 월 CSV가 없으면 미다운로드 파일 ID를 wget --content-disposition으로 다운로드."""
-    import subprocess, shutil
+    """해당 월 CSV가 없으면 미다운로드 파일 ID를 순차 다운로드."""
     os.makedirs(CARD_CSV_DIR, exist_ok=True)
 
-    # 이미 해당 월 파일 있으면 즉시 반환
     if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
         return True
 
-    # 전체 미다운로드 ID 목록 계산
-    done = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
+    # 이미 다운로드된 파일 ID를 파일명으로 추적
+    existing_names = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
     pending = [fid for fid in CARD_FILE_IDS
-               if not any(fid[:8] in f for f in done)]  # 이미 받은 건 건너뜀
+               if not any(fid[:10] in n for n in existing_names)]
 
     if not pending:
-        # 전부 다운로드됐는데 해당 월 파일이 없다면 Drive에 없는 것
         st.error(f"모든 파일 다운로드 완료됐으나 {yyyymm} 데이터 없음")
         return False
 
-    wget_bin = shutil.which("wget")
-    if not wget_bin:
-        st.error("wget을 찾을 수 없습니다")
-        return False
-
-    base_url = "https://drive.usercontent.google.com/download?export=download&confirm=t&id="
-    label = YYYYMM_LABEL.get(yyyymm, yyyymm)
     progress = st.progress(0.0, text=f"카드 데이터 다운로드 중... 0/{len(pending)}")
-
     for i, fid in enumerate(pending, 1):
-        url = base_url + fid
-        subprocess.run(
-            [wget_bin, "-q", "--content-disposition",
-             "--no-check-certificate", "-P", CARD_CSV_DIR, url],
-            capture_output=True, timeout=180,
-        )
-        progress.progress(i / len(pending),
-                          text=f"카드 데이터 다운로드 중... {i}/{len(pending)}")
-        # 해당 월 파일이 생기면 즉시 종료 (나머지는 다음 번에)
+        _download_gdrive_csv(fid, CARD_CSV_DIR)
+        progress.progress(i / len(pending), text=f"카드 데이터 다운로드 중... {i}/{len(pending)}")
         if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
             progress.empty()
             return True
