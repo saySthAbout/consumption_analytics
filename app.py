@@ -1307,14 +1307,15 @@ with tab_pred:
         sel_hour_label!= "전체"
     )
 
-    if not pred_required:
-        st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
-
-    if pred_required and sel_month != "전체":
+    # 지역+월 선택 시 즉시 데이터 다운로드 (업종 드롭다운 채우기 위해)
+    if sel_district != "전체" and sel_month != "전체":
         if "month" not in df.columns or sel_month not in df["month"].values:
             city = sel_district if sel_district != "전체" else None
             ensure_month_in_df(sel_month, city_korean=city)
             st.stop()
+
+    if not pred_required:
+        st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
 
     if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
         try:
