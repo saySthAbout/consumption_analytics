@@ -582,7 +582,7 @@ def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
     yyyymm = f"{year}{month_int:02d}"
 
     # 이미 해당 월 데이터 있는지 확인
-    if df_cur is not None and month_int in df_cur["month"].values:
+    if df_cur is not None and "month" in df_cur.columns and month_int in df_cur["month"].values:
         if city_korean is None:
             return True
         city_en = CITY_KO_TO_EN.get(city_korean)
