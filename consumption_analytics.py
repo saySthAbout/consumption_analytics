@@ -1908,15 +1908,6 @@ with tab_cluster:
             fig_day.update_layout(showlegend=False, coloraxis_showscale=False, height=320)
             st.plotly_chart(fig_day, use_container_width=True)
 
-        # 업종 TOP10
-        st.subheader("업종별 매출 TOP 10")
-        top_biz = (cl_df.groupby("card_tpbuz_nm_2")["amt"].sum()
-                   .nlargest(10).reset_index()
-                   .rename(columns={"card_tpbuz_nm_2": "업종", "amt": "매출액 (원)"}))
-        fig_biz = px.bar(top_biz, x="매출액 (원)", y="업종", orientation="h",
-                         color="매출액 (원)", color_continuous_scale="Purples")
-        fig_biz.update_layout(coloraxis_showscale=False, height=380, yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_biz, use_container_width=True)
 
         # Autoencoder 군집 모델 요약 (있을 때만)
         if os.path.exists(CLUSTER_MODEL_PATH):
