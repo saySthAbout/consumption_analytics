@@ -1249,124 +1249,125 @@ with tab_lstm:
         lt_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == lt_biz1]["card_tpbuz_nm_2"].dropna().unique()) if lt_biz1 != "전체" else ["전체"]
         lt_biz2      = st.selectbox("업종 중분류", lt_biz2_opts, key="lt_biz2")
 
-    # ── 필터 적용 ──
-    lt_df = df.copy()
-    if lt_district != "전체" and lt_admi_name != "전체" and admin_ok:
-        lt_admi_code = admin_name_to_code.get(lt_admi_name)
-        if lt_admi_code:
-            lt_df = lt_df[lt_df["admi_cty_no"] == lt_admi_code]
-    elif lt_district != "전체" and admin_ok:
-        lt_codes = {admin_name_to_code[d] for d in admin_district_to_dongs.get(lt_district, []) if d in admin_name_to_code}
-        lt_df = lt_df[lt_df["admi_cty_no"].isin(lt_codes)]
-    if lt_biz1 != "전체":
+    # ── 필수 조건 체크 ──
+    lt_required = (
+        lt_district  != "전체" and
+        lt_admi_name != "전체" and
+        lt_biz1      != "전체" and
+        lt_biz2      != "전체"
+    )
+
+    if not lt_required:
+        st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
+    else:
+        # ── 필터 적용 ──
+        lt_df = df.copy()
+        if admin_ok:
+            lt_admi_code = admin_name_to_code.get(lt_admi_name)
+            if lt_admi_code:
+                lt_df = lt_df[lt_df["admi_cty_no"] == lt_admi_code]
         lt_df = lt_df[lt_df["card_tpbuz_nm_1"] == lt_biz1]
-    if lt_biz2 != "전체":
         lt_df = lt_df[lt_df["card_tpbuz_nm_2"] == lt_biz2]
 
-    if lt_df.empty:
-        st.warning("선택 조건에 해당하는 데이터가 없습니다.")
-    else:
-        # ta_ymd는 로드 시 이미 datetime으로 변환됨
-        date_col = "ta_ymd" if "ta_ymd" in lt_df.columns else "date"
-        lt_df["_date"] = pd.to_datetime(lt_df[date_col], errors="coerce")
-        all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
-        all_daily = all_daily.rename(columns={"_date": "date"})
-
-        # ── 시작일자 설정 ──
-        min_date = all_daily["date"].min().date()
-        max_date = all_daily["date"].max().date()
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            start_date = st.date_input(
-                "시작일자",
-                value=min_date,
-                min_value=min_date,
-                max_value=max_date,
-                key="lt_start_date"
-            )
-        with sc2:
-            FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
-
-        daily = all_daily[all_daily["date"] >= pd.Timestamp(start_date)]
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=daily["date"].astype(str), y=daily["amt"],
-            name="실제 매출", line=dict(color="#58a6ff")
-        ))
-
-        # LSTM 미래 예측 (모델 있을 때만)
-        if os.path.exists(LSTM_MODEL_PATH):
-            try:
-                import torch
-                lstm_data  = load_lstm_model()
-                model_lstm = lstm_data["model"]
-                seq_len    = lstm_data["seq_len"]
-
-                vals = daily["amt"].values.astype("float32").reshape(-1, 1)
-                if len(vals) < seq_len:
-                    st.caption(f"ℹ️ 데이터가 {len(vals)}일치로 예측에 필요한 {seq_len}일보다 부족해 LSTM 예측을 생략합니다.")
-                else:
-                    # 필터된 데이터 스케일로 자체 정규화 (전체 스케일러 대신)
-                    from sklearn.preprocessing import MinMaxScaler
-                    local_scaler = MinMaxScaler()
-                    scaled   = local_scaler.fit_transform(vals)
-                    last_seq = torch.tensor(scaled[-seq_len:], dtype=torch.float32).unsqueeze(0)
-                    preds = []
-                    model_lstm.eval()
-                    with torch.no_grad():
-                        seq = last_seq.clone()
-                        for _ in range(FORECAST_DAYS):
-                            out = model_lstm(seq)
-                            preds.append(out.item())
-                            next_val = out.unsqueeze(1)
-                            seq = torch.cat([seq[:,1:,:], next_val], dim=1)
-                    pred_vals    = local_scaler.inverse_transform([[p] for p in preds])[:,0]
-                    pred_vals    = np.clip(pred_vals, 0, None)
-                    last_date    = daily["date"].iloc[-1]
-                    future_dates = [str((last_date + pd.Timedelta(days=i+1)).date()) for i in range(FORECAST_DAYS)]
-
-                    fig.add_trace(go.Scatter(
-                        x=future_dates, y=pred_vals,
-                        name="LSTM 예측", line=dict(color="#3fb950", dash="dash")
-                    ))
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("예측 평균 일매출", fmt(pred_vals.mean()))
-                    c2.metric("예측 최고 매출일", fmt(pred_vals.max()))
-                    c3.metric("예측 최저 매출일", fmt(pred_vals.min()))
-            except Exception as e:
-                st.warning(f"LSTM 예측 오류: {e}")
-
-        # 단위 자동 선택
-        max_amt = daily["amt"].max()
-        if max_amt >= 1e8:
-            unit_div, unit_label = 1e8, "억원"
-        elif max_amt >= 1e4:
-            unit_div, unit_label = 1e4, "만원"
+        if lt_df.empty:
+            st.warning("선택 조건에 해당하는 데이터가 없습니다.")
         else:
-            unit_div, unit_label = 1, "원"
+            # ta_ymd는 로드 시 이미 datetime으로 변환됨
+            date_col = "ta_ymd" if "ta_ymd" in lt_df.columns else "date"
+            lt_df["_date"] = pd.to_datetime(lt_df[date_col], errors="coerce")
+            all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
+            all_daily = all_daily.rename(columns={"_date": "date"})
 
-        # 차트 y값 단위 변환
-        for trace in fig.data:
-            trace.y = [v / unit_div for v in trace.y]
-            trace.hovertemplate = f"%{{y:,.1f}}{unit_label}<extra>%{{fullData.name}}</extra>"
+            # ── 시작일자 설정 ──
+            min_date = all_daily["date"].min().date()
+            max_date = all_daily["date"].max().date()
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                start_date = st.date_input(
+                    "시작일자",
+                    value=min_date,
+                    min_value=min_date,
+                    max_value=max_date,
+                    key="lt_start_date"
+                )
+            with sc2:
+                FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
 
-        fig.update_layout(
-            title=f"일별 매출 추이 ({lt_district} {lt_admi_name} · {lt_biz2})",
-            xaxis_title="날짜",
-            yaxis_title=f"매출액 ({unit_label})",
-            yaxis=dict(tickformat=",.1f"),
-            hovermode="x unified",
-            height=440
-        )
-        st.plotly_chart(fig, width="stretch")
+            daily = all_daily[all_daily["date"] >= pd.Timestamp(start_date)]
 
-        avg_amt = daily["amt"].mean()
-        tot_amt = daily["amt"].sum()
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=daily["date"].astype(str), y=daily["amt"],
+                name="실제 매출", line=dict(color="#58a6ff")
+            ))
 
-        d1, d2 = st.columns(2)
-        d1.metric("기간 평균 일매출", fmt(avg_amt))
-        d2.metric("기간 총 매출",     fmt(tot_amt))
+            # LSTM 미래 예측 (모델 있을 때만)
+            if os.path.exists(LSTM_MODEL_PATH):
+                try:
+                    import torch
+                    lstm_data  = load_lstm_model()
+                    model_lstm = lstm_data["model"]
+                    seq_len    = lstm_data["seq_len"]
+
+                    vals = daily["amt"].values.astype("float32").reshape(-1, 1)
+                    if len(vals) < seq_len:
+                        st.caption(f"ℹ️ 데이터가 {len(vals)}일치로 예측에 필요한 {seq_len}일보다 부족해 LSTM 예측을 생략합니다.")
+                    else:
+                        from sklearn.preprocessing import MinMaxScaler
+                        local_scaler = MinMaxScaler()
+                        scaled   = local_scaler.fit_transform(vals)
+                        last_seq = torch.tensor(scaled[-seq_len:], dtype=torch.float32).unsqueeze(0)
+                        preds = []
+                        model_lstm.eval()
+                        with torch.no_grad():
+                            seq = last_seq.clone()
+                            for _ in range(FORECAST_DAYS):
+                                out = model_lstm(seq)
+                                preds.append(out.item())
+                                next_val = out.unsqueeze(1)
+                                seq = torch.cat([seq[:,1:,:], next_val], dim=1)
+                        pred_vals    = local_scaler.inverse_transform([[p] for p in preds])[:,0]
+                        pred_vals    = np.clip(pred_vals, 0, None)
+                        last_date    = daily["date"].iloc[-1]
+                        future_dates = [str((last_date + pd.Timedelta(days=i+1)).date()) for i in range(FORECAST_DAYS)]
+
+                        fig.add_trace(go.Scatter(
+                            x=future_dates, y=pred_vals,
+                            name="LSTM 예측", line=dict(color="#3fb950", dash="dash")
+                        ))
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("예측 평균 일매출", fmt(pred_vals.mean()))
+                        c2.metric("예측 최고 매출일", fmt(pred_vals.max()))
+                        c3.metric("예측 최저 매출일", fmt(pred_vals.min()))
+                except Exception as e:
+                    st.warning(f"LSTM 예측 오류: {e}")
+
+            # 단위 자동 선택
+            max_amt = daily["amt"].max()
+            if max_amt >= 1e8:
+                unit_div, unit_label = 1e8, "억원"
+            elif max_amt >= 1e4:
+                unit_div, unit_label = 1e4, "만원"
+            else:
+                unit_div, unit_label = 1, "원"
+
+            for trace in fig.data:
+                trace.y = [v / unit_div for v in trace.y]
+                trace.hovertemplate = f"%{{y:,.1f}}{unit_label}<extra>%{{fullData.name}}</extra>"
+
+            fig.update_layout(
+                title=f"일별 매출 추이 ({lt_district} {lt_admi_name} · {lt_biz2})",
+                xaxis_title="날짜",
+                yaxis_title=f"매출액 ({unit_label})",
+                yaxis=dict(tickformat=",.1f"),
+                hovermode="x unified",
+                height=440
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            d1, d2 = st.columns(2)
+            d1.metric("기간 평균 일매출", fmt(daily["amt"].mean()))
+            d2.metric("기간 총 매출",     fmt(daily["amt"].sum()))
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
