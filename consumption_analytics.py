@@ -181,39 +181,67 @@ def _is_valid_zip(path):
 
 def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
                      expected_mb: float = 500):
-    """Google Drive 대용량 파일 다운로드 (최신 usercontent 도메인 사용)."""
-    import requests
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
-
-    # 최신 Google Drive 다운로드 URL (바이러스 경고 우회)
-    url = (
-        f"https://drive.usercontent.google.com/download"
-        f"?id={file_id}&export=download&authuser=0&confirm=t"
-    )
-    resp = session.get(url, stream=True, timeout=300)
-    resp.raise_for_status()
-
+    """Google Drive 대용량 파일 다운로드. requests → curl 순서로 시도."""
+    import subprocess, shutil
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    chunk_size = 4 * 1024 * 1024  # 4MB
-    downloaded = 0
-    total_bytes = expected_mb * 1024 * 1024
-    progress = st.progress(0.0, text=f"{label} 다운로드 중...")
-    with open(output_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=chunk_size):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                mb = downloaded / (1024 * 1024)
-                progress.progress(
-                    min(downloaded / total_bytes, 1.0),
-                    text=f"{label} 다운로드 중... {mb:.0f} MB",
-                )
-    progress.empty()
-    # 다운로드된 파일이 너무 작으면 HTML 오류 페이지로 판단
-    if downloaded < 1024 * 100:  # 100KB 미만
-        os.remove(output_path)
-        raise ValueError(f"다운로드 크기 이상 ({downloaded} bytes) — Drive 접근 실패")
+
+    # --- 방법 1: curl (리다이렉트/쿠키 처리가 Python requests보다 안정적) ---
+    curl_bin = shutil.which("curl")
+    if curl_bin:
+        url = (
+            f"https://drive.google.com/uc?export=download"
+            f"&id={file_id}&confirm=t&uuid=1"
+        )
+        progress = st.progress(0.0, text=f"{label} 다운로드 중 (curl)...")
+        proc = subprocess.run(
+            [curl_bin, "-L", "--silent", "--show-error",
+             "-o", output_path, url],
+            capture_output=True, text=True, timeout=600,
+        )
+        progress.empty()
+        if proc.returncode == 0 and os.path.exists(output_path):
+            size = os.path.getsize(output_path)
+            if size >= 1024 * 100:
+                return
+            # 0 bytes 또는 HTML → 삭제 후 방법 2로 fallback
+            os.remove(output_path)
+            st.warning(f"curl 다운로드 실패 (size={size}). requests로 재시도...")
+        else:
+            st.warning(f"curl 오류: {proc.stderr[:200]}. requests로 재시도...")
+
+    # --- 방법 2: requests + usercontent 도메인 ---
+    import requests
+    for url in [
+        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
+        f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t",
+    ]:
+        try:
+            session = requests.Session()
+            session.headers.update({"User-Agent": "Mozilla/5.0"})
+            resp = session.get(url, stream=True, timeout=300, allow_redirects=True)
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type", "")
+            downloaded = 0
+            total_bytes = expected_mb * 1024 * 1024
+            progress = st.progress(0.0, text=f"{label} 다운로드 중...")
+            with open(output_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        progress.progress(
+                            min(downloaded / total_bytes, 1.0),
+                            text=f"{label} 다운로드 중... {downloaded // (1024*1024)} MB",
+                        )
+            progress.empty()
+            if downloaded >= 1024 * 100:
+                return
+            os.remove(output_path)
+            st.warning(f"응답 크기 이상 ({downloaded} bytes, content-type={content_type})")
+        except Exception as e:
+            st.warning(f"requests 오류 ({url[:60]}...): {e}")
+
+    raise ValueError("모든 다운로드 방법 실패 — 아래 Drive 파일 ID 확인 및 공유 설정 점검 필요")
 
 
 def ensure_main_zip():
