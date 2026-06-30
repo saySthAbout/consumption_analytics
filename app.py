@@ -247,6 +247,21 @@ YYYYMM_LABEL = {
 }
 
 
+_BIZ_CAT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "biz_categories.json")
+
+def _load_biz_categories():
+    try:
+        import json
+        with open(_BIZ_CAT_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"biz1": [], "biz2": {}}
+
+_BIZ_CATS = _load_biz_categories()
+BIZ1_OPTS = _BIZ_CATS.get("biz1", [])
+BIZ2_MAP  = _BIZ_CATS.get("biz2", {})
+
+
 def _is_valid_zip(path):
     """시스템 unzip으로 ZIP 유효성 확인 (압축 방식 무관)."""
     import subprocess
@@ -1281,9 +1296,8 @@ with tab_pred:
         sel_day       = {v: k for k, v in DAY_MAP.items()}.get(sel_day_label)
 
     with p2:
-        _biz1_opts = sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []
-        sel_biz1  = st.selectbox("업종 대분류", ["전체"] + _biz1_opts, key="pred_biz1")
-        biz2_opts = sorted(df[df["card_tpbuz_nm_1"] == sel_biz1]["card_tpbuz_nm_2"].dropna().unique()) if sel_biz1 != "전체" and "card_tpbuz_nm_2" in df.columns else []
+        sel_biz1  = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="pred_biz1")
+        biz2_opts = BIZ2_MAP.get(sel_biz1, []) if sel_biz1 != "전체" else []
         sel_biz2  = st.selectbox("업종 중분류", ["전체"] + biz2_opts, key="pred_biz2")
 
         sel_sex_label = st.selectbox("성별", ["전체", "남성", "여성"], key="pred_sex")
@@ -1311,11 +1325,12 @@ with tab_pred:
         sel_hour_label!= "전체"
     )
 
-    # 지역+월 선택 시 즉시 데이터 다운로드 (업종 드롭다운 채우기 위해)
-    if sel_district != "전체" and sel_month != "전체":
+    # 월 선택 시 즉시 데이터 다운로드 (업종 드롭다운 채우기 위해)
+    if sel_month != "전체":
         if "month" not in df.columns or sel_month not in df["month"].values:
             city = sel_district if sel_district != "전체" else None
-            st.info(f"🔄 {sel_district} {sel_month}월 데이터 다운로드 중... (완료 후 자동 갱신)")
+            label = f"{sel_district} " if sel_district != "전체" else ""
+            st.info(f"🔄 {label}{sel_month}월 데이터 다운로드 중... (완료 후 자동 갱신)")
             ok = ensure_month_in_df(sel_month, city_korean=city)
             if not ok:
                 st.error(f"{sel_month}월 데이터 다운로드 실패. 다시 시도해주세요.")
@@ -1458,9 +1473,8 @@ with tab_hm:
         hm_month = st.selectbox("월", _hm_month_opts, key="hm_month",
                                 index=int(loaded_yyyymm[-2:]))
     with hm2:
-        _hm_biz1_opts = sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []
-        hm_biz1      = st.selectbox("업종 대분류", ["전체"] + _hm_biz1_opts, key="hm_biz1")
-        hm_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == hm_biz1]["card_tpbuz_nm_2"].dropna().unique()) if hm_biz1 != "전체" and "card_tpbuz_nm_2" in df.columns else ["전체"]
+        hm_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="hm_biz1")
+        hm_biz2_opts = ["전체"] + BIZ2_MAP.get(hm_biz1, []) if hm_biz1 != "전체" else ["전체"]
         hm_biz2      = st.selectbox("업종 중분류", hm_biz2_opts, key="hm_biz2")
 
     # ── 필수 조건 체크 ──
@@ -1588,9 +1602,8 @@ with tab_lstm:
         else:
             lt_district = lt_admi_name = "전체"
     with lt2:
-        _lt_biz1_opts = sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []
-        lt_biz1      = st.selectbox("업종 대분류", ["전체"] + _lt_biz1_opts, key="lt_biz1")
-        lt_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == lt_biz1]["card_tpbuz_nm_2"].dropna().unique()) if lt_biz1 != "전체" and "card_tpbuz_nm_2" in df.columns else ["전체"]
+        lt_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="lt_biz1")
+        lt_biz2_opts = ["전체"] + BIZ2_MAP.get(lt_biz1, []) if lt_biz1 != "전체" else ["전체"]
         lt_biz2      = st.selectbox("업종 중분류", lt_biz2_opts, key="lt_biz2")
 
     # ── 필수 조건 체크 ──
@@ -1737,9 +1750,8 @@ with tab_cluster:
         all_days  = list(DAY_MAP.values())
         cl_days   = st.multiselect("요일 (전체 선택 = 모든 요일)", all_days, default=all_days, key="cl_days")
     with cl2:
-        _cl_biz1_opts = sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []
-        cl_biz1      = st.selectbox("업종 대분류", ["전체"] + _cl_biz1_opts, key="cl_biz1")
-        cl_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == cl_biz1]["card_tpbuz_nm_2"].dropna().unique()) if cl_biz1 != "전체" and "card_tpbuz_nm_2" in df.columns else ["전체"]
+        cl_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="cl_biz1")
+        cl_biz2_opts = ["전체"] + BIZ2_MAP.get(cl_biz1, []) if cl_biz1 != "전체" else ["전체"]
         cl_biz2      = st.selectbox("업종 중분류", cl_biz2_opts, key="cl_biz2")
 
     # ── 필터 적용 ──
@@ -1881,9 +1893,8 @@ with tab_ai:
         else:
             ai_district = ai_admi_name = "전체"
     with ai2:
-        _ai_biz1_opts = sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []
-        ai_biz1      = st.selectbox("업종 대분류", ["전체"] + _ai_biz1_opts, key="ai_biz1")
-        ai_biz2_opts = ["전체"] + sorted(df[df["card_tpbuz_nm_1"] == ai_biz1]["card_tpbuz_nm_2"].dropna().unique()) if ai_biz1 != "전체" and "card_tpbuz_nm_2" in df.columns else ["전체"]
+        ai_biz1      = st.selectbox("업종 대분류", ["전체"] + BIZ1_OPTS, key="ai_biz1")
+        ai_biz2_opts = ["전체"] + BIZ2_MAP.get(ai_biz1, []) if ai_biz1 != "전체" else ["전체"]
         ai_biz2      = st.selectbox("업종 중분류", ai_biz2_opts, key="ai_biz2")
 
     # 버튼 활성화 조건 검사
@@ -2196,7 +2207,7 @@ with tab_fp:
                 corr_val = merged["FLOWPOP"].corr(merged["SALES"])
                 corr_biz1 = st.selectbox(
                     "업종 대분류 (상관분석용)",
-                    ["전체"] + (sorted(df["card_tpbuz_nm_1"].dropna().unique()) if "card_tpbuz_nm_1" in df.columns else []),
+                    ["전체"] + BIZ1_OPTS,
                     key="corr_biz1"
                 )
                 if corr_biz1 != "전체":
