@@ -130,15 +130,8 @@ def get_flowpop_zip_path(yyyymm: str) -> str:
 
 def ensure_flowpop_zip(yyyymm: str) -> bool:
     """해당 월 flowpop ZIP이 없거나 깨져 있으면 Drive에서 다운로드."""
-    import gdown
     path = get_flowpop_zip_path(yyyymm)
-    def _valid(p):
-        try:
-            with zipfile.ZipFile(p) as zf:
-                return len(zf.namelist()) > 0
-        except Exception:
-            return False
-    if os.path.exists(path) and _valid(path):
+    if os.path.exists(path) and _is_valid_zip(path):
         return True
     if os.path.exists(path):
         os.remove(path)
@@ -148,10 +141,13 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
         file_id = FLOWPOP_MONTHLY_IDS[yyyymm]
     else:
         return False
-    os.makedirs(DATASET_DIR, exist_ok=True)
-    with st.spinner(f"유동인구 데이터 ({YYYYMM_LABEL.get(yyyymm, yyyymm)}) 다운로드 중..."):
-        gdown.download(id=file_id, output=path, quiet=False, fuzzy=True)
-    return _valid(path)
+    label = f"유동인구 {YYYYMM_LABEL.get(yyyymm, yyyymm)}"
+    try:
+        _gdrive_download(file_id, path, label)
+    except Exception as e:
+        st.error(f"유동인구 다운로드 오류: {e}")
+        return False
+    return _is_valid_zip(path)
 
 SEMAS_DIR      = DATASET_DIR
 SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
@@ -175,24 +171,59 @@ YYYYMM_LABEL = {
 }
 
 
+def _is_valid_zip(path):
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            return len(zf.namelist()) > 0
+    except Exception:
+        return False
+
+
+def _gdrive_download(file_id: str, output_path: str, label: str = "파일"):
+    """requests로 Google Drive 대용량 파일 직접 다운로드 (바이러스 확인 우회)."""
+    import requests
+    session = requests.Session()
+    base_url = "https://drive.google.com/uc"
+
+    # 1차 요청 → 확인 토큰 추출
+    resp = session.get(base_url, params={"export": "download", "id": file_id}, stream=True)
+    confirm = next(
+        (v for k, v in resp.cookies.items() if k.startswith("download_warning")),
+        None,
+    )
+    if confirm:
+        resp = session.get(
+            base_url,
+            params={"export": "download", "id": file_id, "confirm": confirm},
+            stream=True,
+        )
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    chunk_size = 4 * 1024 * 1024  # 4MB
+    downloaded = 0
+    progress = st.progress(0, text=f"{label} 다운로드 중...")
+    with open(output_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                mb = downloaded / (1024 * 1024)
+                progress.progress(min(downloaded / (1200 * 1024 * 1024), 1.0),
+                                   text=f"{label} 다운로드 중... {mb:.0f} MB")
+    progress.empty()
+
+
 def ensure_main_zip():
     """ZIP이 없거나 깨져 있으면 Google Drive에서 다운로드."""
-    def _is_valid_zip(path):
-        try:
-            with zipfile.ZipFile(path, "r") as zf:
-                return len(zf.namelist()) > 0
-        except Exception:
-            return False
-
     if os.path.exists(MAIN_DATA_ZIP_PATH) and _is_valid_zip(MAIN_DATA_ZIP_PATH):
         return True
-    # 깨진 파일 제거 후 재다운로드
     if os.path.exists(MAIN_DATA_ZIP_PATH):
         os.remove(MAIN_DATA_ZIP_PATH)
-    import gdown
-    os.makedirs(DATASET_DIR, exist_ok=True)
-    with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
-        gdown.download(id=MAIN_DATA_ZIP_GDRIVE_ID, output=MAIN_DATA_ZIP_PATH, quiet=False, fuzzy=True)
+    try:
+        _gdrive_download(MAIN_DATA_ZIP_GDRIVE_ID, MAIN_DATA_ZIP_PATH, "카드 데이터 ZIP (약 1GB)")
+    except Exception as e:
+        st.error(f"다운로드 오류: {e}")
+        return False
     return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
@@ -224,10 +255,11 @@ def ensure_semas_data():
     # zip도 없고 Drive ID도 없으면 패스 (탭에서 경고 표시)
     if not SEMAS_GDRIVE_FILE_ID:
         return
-    import gdown
-    os.makedirs(DATASET_DIR, exist_ok=True)
-    with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
-        gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
+    try:
+        _gdrive_download(SEMAS_GDRIVE_FILE_ID, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)")
+    except Exception as e:
+        st.error(f"상권 데이터 다운로드 오류: {e}")
+        return
     _extract_semas_zip()
 
 
@@ -1952,10 +1984,7 @@ with tab_semas:
     if not zip_exists and not csv_exists:
         if SEMAS_GDRIVE_FILE_ID:
             if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
-                import gdown
-                os.makedirs(DATASET_DIR, exist_ok=True)
-                with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
-                    gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
+                _gdrive_download(SEMAS_GDRIVE_FILE_ID, SEMAS_ZIP_PATH, "상권 데이터 ZIP (약 240MB)")
                 st.rerun()
         else:
             st.warning(
