@@ -1409,11 +1409,11 @@ with tab_ov:
     st.dataframe(pd.DataFrame({
         "변수명": MODEL_FEATURES,
         "인코딩 방식": [enc_map.get(c, "Label Encoding") for c in MODEL_FEATURES],
-    }), width='stretch')
+    }), use_container_width=True)
 
     st.subheader("행정동 목록")
     st.write(f"행정동 코드 CSV 로드 개수: {len(admin_df)}개  /  행정동 옵션 개수: {len(admin_name_to_code)}개")
-    st.dataframe(admin_df, width='stretch')
+    st.dataframe(admin_df, use_container_width=True)
 
     st.subheader("모델 파일 상태")
     paths_check = [SALES_MODEL_PATH, MODEL_INFO_PATH,
@@ -1421,10 +1421,10 @@ with tab_ov:
     st.dataframe(pd.DataFrame({
         "파일": paths_check,
         "존재 여부": [os.path.exists(p) for p in paths_check],
-    }), width='stretch')
+    }), use_container_width=True)
 
     st.subheader("원본 데이터 미리보기")
-    st.dataframe(df.head(30), width='stretch')
+    st.dataframe(df.head(30), use_container_width=True)
 
 # =====================================================
 # 📊 소비 트렌드 (구 탭2)
