@@ -1311,7 +1311,7 @@ with tab_pred:
         st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
 
     if pred_required and sel_month != "전체":
-        if sel_month not in df["month"].values:
+        if "month" not in df.columns or sel_month not in df["month"].values:
             city = sel_district if sel_district != "전체" else None
             ensure_month_in_df(sel_month, city_korean=city)
 
@@ -1477,7 +1477,7 @@ with tab_hm:
         hm_df = hm_df[hm_df["card_tpbuz_nm_2"] == hm_biz2]
         hm_m  = int(hm_month.replace("월", ""))
         # 해당 지역·월 데이터가 없으면 해당 도시만 다운로드
-        if hm_m not in df["month"].values:
+        if "month" not in df.columns or hm_m not in df["month"].values:
             ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
         hm_df = hm_df[hm_df["month"] == hm_m]
 
@@ -1747,7 +1747,7 @@ with tab_cluster:
         cl_df = cl_df[cl_df["card_tpbuz_nm_2"] == cl_biz2]
     if cl_month != "전체":
         cl_m = int(cl_month.replace("월", ""))
-        if cl_m not in df["month"].values:
+        if "month" not in df.columns or cl_m not in df["month"].values:
             ensure_month_in_df(cl_m, city_korean=cl_district if cl_district != "전체" else None)
         cl_df = cl_df[cl_df["month"] == cl_m]
     if cl_days and len(cl_days) < len(all_days):
