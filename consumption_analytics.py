@@ -149,10 +149,9 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
     else:
         return False
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={file_id}&confirm=t"
     with st.spinner(f"유동인구 데이터 ({YYYYMM_LABEL.get(yyyymm, yyyymm)}) 다운로드 중..."):
-        gdown.download(url, path, quiet=False)
-    return os.path.exists(path)
+        gdown.download(id=file_id, output=path, quiet=False)
+    return _valid(path)
 
 SEMAS_DIR      = DATASET_DIR
 SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
@@ -192,9 +191,8 @@ def ensure_main_zip():
         os.remove(MAIN_DATA_ZIP_PATH)
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={MAIN_DATA_ZIP_GDRIVE_ID}&confirm=t"
     with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
-        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False)
+        gdown.download(id=MAIN_DATA_ZIP_GDRIVE_ID, output=MAIN_DATA_ZIP_PATH, quiet=False)
     return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
@@ -228,9 +226,8 @@ def ensure_semas_data():
         return
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
-    url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}&confirm=t"
     with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
-        gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+        gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False)
     _extract_semas_zip()
 
 
@@ -915,7 +912,8 @@ if "df" not in st.session_state:
     if load_btn:
         zip_ok = ensure_main_zip()
         if not zip_ok:
-            st.error("데이터 ZIP 다운로드 실패. 네트워크를 확인해주세요.")
+            st.error("데이터 ZIP 다운로드 실패. Google Drive 공유 설정 또는 네트워크를 확인해주세요.")
+            st.info(f"Drive 파일 ID: `{MAIN_DATA_ZIP_GDRIVE_ID}` — 링크가 '링크가 있는 모든 사용자'로 공유되어 있는지 확인하세요.")
         else:
             try:
                 with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
@@ -1956,9 +1954,8 @@ with tab_semas:
             if st.button("📥 상권 데이터 다운로드 (최초 1회)", key="semas_download"):
                 import gdown
                 os.makedirs(DATASET_DIR, exist_ok=True)
-                url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}&confirm=t"
                 with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
-                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+                    gdown.download(id=SEMAS_GDRIVE_FILE_ID, output=SEMAS_ZIP_PATH, quiet=False)
                 st.rerun()
         else:
             st.warning(
