@@ -1,12 +1,12 @@
 streamlit
 pandas
 numpy
-scikit-learn
+scikit-learn==1.6.1
 joblib
 matplotlib
 seaborn
 gdown==4.7.3
-lightgbm
+lightgbm==4.6.0
 torch
 openai
 plotly
