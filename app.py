@@ -164,9 +164,16 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
         ok = _hf_download(fname, path, label)
         return ok and _is_valid_zip(path)
     elif yyyymm in FLOWPOP_MONTHLY_IDS:
-        # 월별 zip은 Google Drive fallback
-        file_id = FLOWPOP_MONTHLY_IDS[yyyymm]
         label = f"유동인구 {YYYYMM_LABEL.get(yyyymm, yyyymm)}"
+        fname = f"flowpop_admi_{yyyymm}.zip"
+        # HuggingFace 우선 시도
+        ok = _hf_download(fname, path, label)
+        if ok and _is_valid_zip(path):
+            return True
+        # HF 실패 시 Google Drive fallback
+        if os.path.exists(path):
+            os.remove(path)
+        file_id = FLOWPOP_MONTHLY_IDS[yyyymm]
         try:
             _gdrive_download(file_id, path, label)
         except Exception as e:
@@ -2135,23 +2142,26 @@ with tab_fp:
         dow_label = {0:"월",1:"화",2:"수",3:"목",4:"금",5:"토",6:"일"}
         dow_order = ["월","화","수","목","금","토","일"]
         hm_filtered = _fp_filter(fp_hm)
-        hm_filtered = hm_filtered.copy()
-        hm_filtered["DOW_LABEL"] = hm_filtered["DOW"].map(dow_label)
-        hm_data = (hm_filtered.groupby(["DOW_LABEL","TIME_CD"])["TOTAL_CNT"]
-                   .mean().reset_index())
-        hm_pivot = (hm_data.pivot(index="DOW_LABEL", columns="TIME_CD", values="TOTAL_CNT")
-                    .reindex(dow_order))
+        if hm_filtered.empty:
+            st.info("선택 조건에 해당하는 유동인구 데이터가 없습니다.")
+        else:
+            hm_filtered = hm_filtered.copy()
+            hm_filtered["DOW_LABEL"] = hm_filtered["DOW"].map(dow_label)
+            hm_data = (hm_filtered.groupby(["DOW_LABEL","TIME_CD"])["TOTAL_CNT"]
+                       .mean().reset_index())
+            hm_pivot = (hm_data.pivot(index="DOW_LABEL", columns="TIME_CD", values="TOTAL_CNT")
+                        .reindex(dow_order))
 
-        fig_hm = go.Figure(go.Heatmap(
-            z=hm_pivot.values,
-            x=[f"{h}시" for h in hm_pivot.columns],
-            y=hm_pivot.index,
-            colorscale="Blues",
-            hovertemplate="요일: %{y}<br>시간: %{x}<br>평균 유동인구: %{z:,.0f}명<extra></extra>",
-        ))
-        fig_hm.update_layout(xaxis_title="시간대", yaxis_title="요일",
-                             height=340, margin=dict(t=20, b=40))
-        st.plotly_chart(fig_hm, use_container_width=True)
+            fig_hm = go.Figure(go.Heatmap(
+                z=hm_pivot.values,
+                x=[f"{h}시" for h in hm_pivot.columns],
+                y=hm_pivot.index,
+                colorscale="Blues",
+                hovertemplate="요일: %{y}<br>시간: %{x}<br>평균 유동인구: %{z:,.0f}명<extra></extra>",
+            ))
+            fig_hm.update_layout(xaxis_title="시간대", yaxis_title="요일",
+                                 height=340, margin=dict(t=20, b=40))
+            st.plotly_chart(fig_hm, use_container_width=True)
 
         st.divider()
 
@@ -2166,10 +2176,11 @@ with tab_fp:
         am = [c for c in AGE_COLS_M if c in age_filtered.columns]
         af = [c for c in AGE_COLS_F if c in age_filtered.columns]
         male_agg, female_agg = defaultdict(float), defaultdict(float)
-        for c in am:
-            male_agg[_age_label(c)] += age_filtered[c].sum()
-        for c in af:
-            female_agg[_age_label(c)] += age_filtered[c].sum()
+        if not age_filtered.empty:
+            for c in am:
+                male_agg[_age_label(c)] += age_filtered[c].sum()
+            for c in af:
+                female_agg[_age_label(c)] += age_filtered[c].sum()
 
         age_order = ["10대 미만","10대","20대","30대","40대","50대","60대","70대 이상"]
         fig_age = go.Figure()
