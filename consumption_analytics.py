@@ -470,34 +470,62 @@ CITY_KO_TO_EN: dict[str, str] = {
 }
 
 
+def _build_fileid_map() -> dict[str, str]:
+    """파일명 → file_id 매핑을 병렬 Range 헤더 요청으로 빌드 (파일 본문 미다운로드)."""
+    cached = st.session_state.get("_fileid_map")
+    if cached:
+        return cached
+
+    import concurrent.futures, requests as _req, re as _re
+
+    def _head_fname(fid):
+        url = (f"https://drive.usercontent.google.com/download"
+               f"?id={fid}&export=download&confirm=t")
+        try:
+            r = _req.get(url, headers={"Range": "bytes=0-0",
+                                       "User-Agent": "Mozilla/5.0"},
+                         timeout=15, allow_redirects=True, stream=True)
+            r.close()
+            cd = r.headers.get("Content-Disposition", "")
+            m = _re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)',
+                           cd, _re.IGNORECASE)
+            return fid, m.group(1).strip() if m else None
+        except Exception:
+            return fid, None
+
+    with st.spinner("파일 목록 확인 중... (최초 1회)"):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as ex:
+            results = list(ex.map(_head_fname, CARD_FILE_IDS))
+
+    mapping = {fname: fid for fid, fname in results if fname}
+    st.session_state["_fileid_map"] = mapping
+    return mapping
+
+
 def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
-    """선택 도시의 해당 월 CSV 파일만 다운로드 (없으면 전체 시도)."""
+    """선택 도시의 해당 월 CSV 파일 1개만 다운로드."""
     os.makedirs(CARD_CSV_DIR, exist_ok=True)
     city_en = CITY_KO_TO_EN.get(city_korean)
 
-    # 이미 해당 도시·월 파일 있으면 즉시 반환
     if city_en:
-        found = glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv"))
-        if found:
+        if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv")):
             return True
     elif glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
         return True
 
-    existing_names = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
-    pending = [fid for fid in CARD_FILE_IDS
-               if not any(fid[:10] in n for n in existing_names)]
+    # 파일명→ID 매핑으로 바로 찾기
+    if city_en:
+        fileid_map = _build_fileid_map()
+        target_name = f"tbsh_gyeonggi_day_{yyyymm}_{city_en}.csv"
+        fid = fileid_map.get(target_name)
+        if fid:
+            label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}"
+            with st.spinner(f"{label} 데이터 다운로드 중..."):
+                saved = _download_gdrive_csv(fid, CARD_CSV_DIR)
+            return saved is not None
 
-    label = f"{YYYYMM_LABEL.get(yyyymm, yyyymm)} {city_korean}" if city_en else YYYYMM_LABEL.get(yyyymm, yyyymm)
-    target = f"{yyyymm}_{city_en}" if city_en else yyyymm
-
-    with st.spinner(f"{label} 데이터 다운로드 중..."):
-        for fid in pending:
-            saved = _download_gdrive_csv(fid, CARD_CSV_DIR)
-            if saved and target in os.path.basename(saved):
-                return True  # 원하는 파일 찾음 → 즉시 종료
-
-    # city_en 매핑이 없거나 못 찾은 경우 전체 월 확인
-    return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
+    # city_en 매핑 없거나 ID 못 찾은 경우 전체 월 다운로드로 폴백
+    return ensure_month_csvs(yyyymm)
 
 
 def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
