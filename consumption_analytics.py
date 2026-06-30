@@ -1133,36 +1133,23 @@ model_name      = "LightGBM"
 loaded_yyyymm = st.session_state.get("loaded_yyyymm")
 
 if "df" not in st.session_state:
-    # 데이터 미로드 → 메인 화면에 로드 UI 표시
-    st.markdown("---")
-    st.markdown("### 📅 분석할 월을 선택하세요")
-    col_sel, col_btn = st.columns([2, 1])
-    with col_sel:
-        selected_yyyymm = st.selectbox(
-            "조회 월",
-            AVAILABLE_YYYYMM,
-            format_func=lambda x: YYYYMM_LABEL[x],
-            index=len(AVAILABLE_YYYYMM) - 1,
-            key="selected_yyyymm",
-        )
-    with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        load_btn = st.button("📥 데이터 로드", type="primary", key="load_month_btn")
-
-    if load_btn:
-        csv_ok = ensure_month_csvs(selected_yyyymm)
-        if csv_ok:
-            try:
-                with st.spinner(f"{YYYYMM_LABEL[selected_yyyymm]} 데이터 로드 중..."):
-                    raw_df, sales_enc, sales_path = load_sales_data(selected_yyyymm)
-                    st.session_state["df"]            = preprocess_data(raw_df)
-                    st.session_state["loaded_yyyymm"] = selected_yyyymm
-                    st.session_state["sales_enc"]     = sales_enc
-                    st.session_state["sales_path"]    = sales_path
-                st.rerun()
-            except Exception as e:
-                st.error(f"매출 데이터 로드 실패: {e}")
-    st.stop()
+    _init_yyyymm = AVAILABLE_YYYYMM[-1]  # 가장 최신 월 자동 로드
+    csv_ok = ensure_month_csvs(_init_yyyymm)
+    if csv_ok:
+        try:
+            with st.spinner(f"{YYYYMM_LABEL[_init_yyyymm]} 데이터 로드 중..."):
+                raw_df, sales_enc, sales_path = load_sales_data(_init_yyyymm)
+                st.session_state["df"]            = preprocess_data(raw_df)
+                st.session_state["loaded_yyyymm"] = _init_yyyymm
+                st.session_state["sales_enc"]     = sales_enc
+                st.session_state["sales_path"]    = sales_path
+            st.rerun()
+        except Exception as e:
+            st.error(f"초기 데이터 로드 실패: {e}")
+            st.stop()
+    else:
+        st.error("초기 데이터를 불러올 수 없습니다. 잠시 후 새로고침 해주세요.")
+        st.stop()
 
 df         = st.session_state["df"]
 sales_enc  = st.session_state.get("sales_enc", "-")
