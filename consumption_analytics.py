@@ -181,7 +181,7 @@ def _is_valid_zip(path):
 
 def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
                      expected_mb: float = 500):
-    """Google Drive 대용량 파일 다운로드. wget → curl → requests 순서로 시도."""
+    """wget으로 Google Drive 직접 다운로드 (가장 빠름)."""
     import subprocess, shutil
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
@@ -190,78 +190,28 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
         f"?id={file_id}&export=download&confirm=t"
     )
 
-    # --- 방법 1: wget (쿠키+리다이렉트 자동 처리) ---
-    wget_bin = shutil.which("wget")
-    if wget_bin:
-        progress = st.progress(0.0, text=f"{label} 다운로드 중 (wget)...")
-        proc = subprocess.run(
-            [wget_bin, "--no-check-certificate", "-q",
-             "-O", output_path, dl_url],
-            capture_output=True, text=True, timeout=1200,
-        )
-        progress.empty()
-        if proc.returncode == 0 and os.path.exists(output_path):
-            size = os.path.getsize(output_path)
-            if size >= 1024 * 100:
-                return
-            os.remove(output_path)
-            st.warning(f"wget 실패 (size={size})")
+    wget_bin = shutil.which("wget") or shutil.which("curl")
+    if not wget_bin:
+        raise RuntimeError("wget/curl 없음")
+
+    spinner_text = f"{label} 다운로드 중... (완료될 때까지 기다려 주세요)"
+    with st.spinner(spinner_text):
+        if "wget" in wget_bin:
+            cmd = [wget_bin, "-q", "--show-progress",
+                   "--no-check-certificate", "-O", output_path, dl_url]
         else:
-            st.warning(f"wget 오류: {proc.stderr[:300]}")
+            cmd = [wget_bin, "-L", "--silent", "--show-error",
+                   "-o", output_path, dl_url]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
 
-    # --- 방법 2: curl ---
-    curl_bin = shutil.which("curl")
-    if curl_bin:
-        progress = st.progress(0.0, text=f"{label} 다운로드 중 (curl)...")
-        proc = subprocess.run(
-            [curl_bin, "-L", "--silent", "--show-error",
-             "-o", output_path, dl_url],
-            capture_output=True, text=True, timeout=1200,
-        )
-        progress.empty()
-        if proc.returncode == 0 and os.path.exists(output_path):
-            size = os.path.getsize(output_path)
-            if size >= 1024 * 100:
-                return
+    if proc.returncode != 0:
+        raise RuntimeError(f"다운로드 오류: {proc.stderr[:300]}")
+    size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+    if size < 1024 * 100:
+        if os.path.exists(output_path):
             os.remove(output_path)
-            st.warning(f"curl 실패 (size={size}). Content 헤더: "
-                       + proc.stderr[:200])
-        else:
-            st.warning(f"curl 오류: {proc.stderr[:200]}")
+        raise RuntimeError(f"다운로드 크기 이상 ({size} bytes) — Drive 파일 확인 필요")
 
-    # --- 방법 2: requests + usercontent 도메인 ---
-    import requests
-    for url in [
-        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
-        f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t",
-    ]:
-        try:
-            session = requests.Session()
-            session.headers.update({"User-Agent": "Mozilla/5.0"})
-            resp = session.get(url, stream=True, timeout=300, allow_redirects=True)
-            resp.raise_for_status()
-            content_type = resp.headers.get("Content-Type", "")
-            downloaded = 0
-            total_bytes = expected_mb * 1024 * 1024
-            progress = st.progress(0.0, text=f"{label} 다운로드 중...")
-            with open(output_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        progress.progress(
-                            min(downloaded / total_bytes, 1.0),
-                            text=f"{label} 다운로드 중... {downloaded // (1024*1024)} MB",
-                        )
-            progress.empty()
-            if downloaded >= 1024 * 100:
-                return
-            os.remove(output_path)
-            st.warning(f"응답 크기 이상 ({downloaded} bytes, content-type={content_type})")
-        except Exception as e:
-            st.warning(f"requests 오류 ({url[:60]}...): {e}")
-
-    raise ValueError("모든 다운로드 방법 실패 — 아래 Drive 파일 ID 확인 및 공유 설정 점검 필요")
 
 
 def ensure_main_zip():
