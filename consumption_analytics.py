@@ -154,8 +154,85 @@ SEMAS_ZIP_NAME = "semas_store_info_202603.zip"
 SEMAS_ZIP_PATH = os.path.join(DATASET_DIR, SEMAS_ZIP_NAME)
 SEMAS_GDRIVE_FILE_ID = "1Gp573SzYdObGWVi4r6hSJFX0oFumq8qr"
 
-CARD_CSV_FOLDER_ID = "140ZPjvmD6aa2c5r7Tx5ZDLc_enBzCDOX"
-CARD_CSV_DIR       = os.path.join(DATASET_DIR, "card_csvs")
+CARD_CSV_DIR = os.path.join(DATASET_DIR, "card_csvs")
+
+# 140개 개별 CSV 파일 Drive ID 목록
+CARD_FILE_IDS = [
+    "1-3pAZuCvLAkRRWs-sb1onUpkpxlXw2gS","1-VJpHQUFtRszuPAqP69v6Yom94tJk3dC",
+    "1-axkNlIOnGTbSEe58ytQL5SUXOOriQml","102Qp1t4DfG7293HBqUuHfSRTqmJN1xKD",
+    "109yoCUh5byvP8t_dF5wtoreoI5ZPzL29","10taGIxHTaYCkTimv_jJWD-Jd3VtKWOVW",
+    "11WS7Bz_3jUCIfCVuE0tTzRL5uyWbjJ0w","11_Hm7R88HIDUkDUNaIxFwfjTKGSTkmh4",
+    "11bzOh_jJqyuYt9BZXBdoUuodt1X585fn","11tsh9kFTGHKUCyf_8Clu94fB2r9yGcR2",
+    "12SCHkMxAyv6pHcNL7js2IHuEMUdKh5dd","12kEF6ZCbH716UwPcknLnUnyRhbOvepgR",
+    "12zCrZ63LshOFn_3k0cIv9XVcf2R9P86g","132Om4qXZ8S71NEkAc8jz1Aix-InIlhcO",
+    "135rdfWjilzgNjXi3V26tlZPyma4wpgJR","13_Zw3vNOlIMQBt_TsVNl2-6EHkBiip-5",
+    "15pJPylZa2HetElGWlbcCZq-RsjhRH1mn","168R1aFtvezaobUVkrRamx_pu6ZF1d5k9",
+    "16PEc97-tp3k6p4Ss0cMLgEcOJPbhm2FI","17Ut_y7MjPV9zSuDOf99vOMP0UsKtiLIx",
+    "18yKo4gL1dTgOPbol8PD1jr54_8OqFCA0","18zTiXQb0nTPXVlnEVNukbRtujjPNV6vF",
+    "196Ur0-z_TazDJnIaJUg-MJepBE1An1aI","19nIIjArgJWANDsxdVrTCm0GALA8xUdWb",
+    "1A6vyHsZNdt5tZIFZCcPdI-z19Qt1_9VG","1ALw_N0s4XstR4TmlyYYabPLGv31aYx2s",
+    "1Adqk9ioPIukCIjIN3Wncz3SoB6MOi3hS","1AiEyf0wFL9RsoR9XPoXScC8ljreu7Sc6",
+    "1B8nFYKSaNaSlVEW2fE2JnQ6t8LmiHZFX","1C5kv9BHtiVzM8F6f_7RxENWqjDidFx_t",
+    "1CLIN6b2hAym1Z3PufuO8XNqfGj2SGgAs","1Cq1ugU2gihHCiv1EEp1H2lRrt6NXUhCS",
+    "1Cxo4AIQhtWIC5wiI2QLeTcnorjZT6pTB","1DEAnn_u0bBQSkaUFFI_UEtjmoINU2Eni",
+    "1DM7bShml5ejo6C73QFPguIFFEWA1JlRA","1E5oCNA4YIJUSO2lCLsra1_OfYG26hsYQ",
+    "1EG87hirfNT896u2-P38VtRvWF591rAaR","1EQqdejs23kH8dj_2D4MjQb03szO-uBsf",
+    "1EaX6Cbg4dx9krOmM_W4shp0nBw4WTBDK","1EqGcT-bbHUe9TLNzpDTxQViD00xg92Yp",
+    "1ErWtQtJVfcD2BQxnJ5b3ErSrVb1o_2WH","1GA6Y8b6SHRoa-B21QMFaB9jc2S_y4ieO",
+    "1GdKs73XGN4Lb_tmPCHv5ytO06L-rBqYp","1Gqwdu0IAdMe37XBe-zs-fIKITV4etTWV",
+    "1GuYZWEAY0IrDcrLuwAKDlPOxEXE14yRJ","1H5Ck3EpJiQ5SsnsgekgGGVcW4KKG9rNx",
+    "1HPp8VFfZgS5QfoPSx3EOl_vUEbJ9NbLK","1IZv1632xLJBeF6gDQZLoHMlAbB8NYFgw",
+    "1ImPDU5H9-tMgdodINneqv1YP23EKWRuh","1IrREy9pEM2BwhscX6iVA0Lh8MQcfqBqh",
+    "1IvL0EEhsh1fW2FQlL5E8oIGzGBZe1XoC","1Ix0onecekPb2sgF_dAuO8kshNnrbcwPd",
+    "1Jj3XyeSQr8xodBZVzvpV6R9UKpK-DFHX","1JnqB9Yu0eo_VO5iOKkxZHMhTFAH17BPh",
+    "1K0PBm6OgnAQwkvwNz_FB-YMmDEjDMCDr","1KV7WJV8YDFNPEeQmJ9VKSXLIKCdb1TUM",
+    "1Kt9ZsDJYdrBt8VC7r5B85zJT94q1nMB_","1KzpEMZw2BxcMJxglpWfLVAoodSMR_tEF",
+    "1LJvPl45Jz7ZLRqjCq0f0L8nCy6xe7lc_","1LwZ9LUDoSRagzvF6HNfdnR75CTqCERCf",
+    "1MXL1Co_AFMJpNklLZ0J2_IVDBPYJfxPU","1MqxIMfuDzgMrWYFMGbt0-0s3c91fJNp0",
+    "1NVkYghC6laKnGheZhbWlHny7QJkg0z2R","1OfwlqP-2hRoz6lLHjJulnvZQkBWagSBU",
+    "1PtfX9zBmynYaQWJed_lTiAye2dqasGgh","1R11TDy_Q-3ExIB8KBpnpXKNuJJcE6WrV",
+    "1R4VdKLoT23PaFTCZFjnxBztHK4k4J9Y6","1Rejq6wlpSTX4KmjM8164KOhCaMdMQEYh",
+    "1Rl50q4zc6hk3JKDSsYF4eJdP2gYbrrsP","1RlNpPH349v81e4uwLvwtojUM1aPOVIlN",
+    "1S9DGmu4tcCe9JpqQhcK7dL-AM9hnRvVV","1S_3P3sUaVxnP9chTW0xVSUAle2UTlSgo",
+    "1T1lgmsCwDp4X3nuFHxrQ4GKcRw1bFfqx","1T5gcC8Ze7C8N5GIVtvXzcmTBJgP5x4Fg",
+    "1U2v_9wujImPlE0BYXmYRrDTMQ7BSmzus","1VG6mW_pRCaMiVcoj1zr9SV5uE8IV00tK",
+    "1VasYJZkOfGJgBCpGV92ZVCjypEvWA8Uy","1VxpBgFX6VdFvu6qqLaWzPQCyex-X1y0A",
+    "1WVTnUy8MBKC3rnkFu6Acxzlpk0NIcH0l","1XImAoAg67Mluy1Gw_jcQY8QdumJHYruK",
+    "1YGyxv2r54rnfOLJn1xK7ujoTb5ECYyQ0","1Z4x9uPEIaUxdygmdPXmqkrGejlinkPjv",
+    "1_2R5XRyH25I8IbbpjT9zJpU1R3vudgQs","1_5rj-9TOYQ1MxoQjJEJQSRbCs8TOuO5A",
+    "1_6PCCFGv2w7zMMtnrS5ryvevvDW19niz","1_UdVpJQOXX0nQs6CPG4rcxcvppfQxPOp",
+    "1_V4wdu2C9qO75S0OA2c5qorM2db4Yl8N","1_pi2DdOWS-EkFYNrnUT1SHCTQTLmbVH-",
+    "1a7leFmTm0r9cOVaIFosg-5xhyCVJh4Ff","1akKBYs8KJq8-nn2JSxoG9KeOCtP_d5a-",
+    "1aqpgujqg0EZJ1WoL_ggHFmxfWZqtl6Oj","1bQkgD8S7v7Qrm8dOrSkGt7hJQ2yd2bP4",
+    "1bkXOpDIQoxMP2QeqP_zOENaF4gXANmf4","1cNYcBLdld5MHiJ73I0o0nNrUy2aB-7HG",
+    "1caH5KNOAVH6d45alrea47HAG7MBjNbmL","1dE7c7k7KkAdCNAafBN6iegyPF7vDepGl",
+    "1dVhnTUV0Yg20OOjW2XKUVV-_cgbstJQ5","1fnxS9wGEGcYTCdg4iGOs9zpm4SUSSMZ5",
+    "1gwbFLX-FDhcknzedtj4pkS4M072UlTtF","1hHIEU-NyH_m0FBASdlliUSc6Odv66bxe",
+    "1he1WER3cIeZudJb57u4GxDMpKh8X4V2c","1iYD_pHXwURHv3QudBWfYC-_CUuQGmVOn",
+    "1iey45-XXnXSQFL2mc-w8dcPUCjpXFeCx","1ir9j7IldHIYxAtI5DNeTKQHxrYuDCipx",
+    "1itH68-fmA210AZOr-AOwZwHpxglRQFWA","1jGn9oiIL2a1GMonpI3KMcGOmuKY-rcdB",
+    "1kLAG-WgWQyzBmTgTnePQMpz3FBzgJ_9O","1kLx45wxLgksrv0EWUjb8mGsVp4s-7QHw",
+    "1kTX8CE6-V-D7wUUT-2XzwdMNefZqYIui","1l6mEZBNq2bScXtjbzunOVKX7PWFXggwB",
+    "1lDxBW59oKK1-sTavn0JZc7jst2OfJrG7","1lVB1y61Ssic03Vn8TO5F6LsZpQSLmWZs",
+    "1mYh_trO15DPouZccp4uuOY_9vfzzimLi","1mfMPKcGJZnk-HC83Jf5W9vCgEjBslJ2s",
+    "1o8rbCU3GwuIbukcdzopTFqNNkxz5bKds","1ommdybTOealR5JVhko_5SNdtArmprq3-",
+    "1q2OJrhrXU7NPn2PMDVcc3WcKhoK7dOad","1q6wTBqRU7FzKgjK39ulRBzkHiIcnWvz_",
+    "1qpcXVz8SMZOjhcgst56rIfh_VuDUMO7-","1r3eyiqBc55EELf7r1TLQFiE48rS_8tz2",
+    "1rPzFb24ACNDDOuL1x9TKFbhI3LwPpVLJ","1rlgJTUIqtpL0tZf14OWAJnmVRgbSA8di",
+    "1sQs9Wp-fFv89etsbB137o0r6saLGOPfj","1sXoNoaIm4CFI0NAeed5rSCsdmdTOtEmN",
+    "1sZxDNCC-FcVz9DGokIEfRbaqCGimPuom","1tSvNkmP4DVz9I-lR62RNiNuAVYxOTv0k",
+    "1tgHO2cmfslsdx-Jo457ijw58hDQSojab","1tyo3SqP6-wSKEeV3MnPDFH6TcfAh0Ycw",
+    "1u-PjQfZDicYtaqev_prwDoyd7dsUJrgd","1uDoUvNO9piz8oQ-nwx0-cXXNCZg5sWBb",
+    "1vkC0XakqYDnnF1u4A4F_sI4h0k1Ee_wz","1vy3m9ziDFhs88NebBiC3vSVoz7ixv1-H",
+    "1w9ZxRvf_LpBbvtUDfu-x-8LxLwdX5IHs","1x4CkqcGyc7gxzmgUbBkXncLB6f8dvBc4",
+    "1x68VDK4ejfrz5xfucHsMGT-OOX_EEJqd","1xZhX6FQNpPAdntUUvaYTJ0M7kmv28kGK",
+    "1xfX12az_715RmxV1BX9hLy5LfUTUaYN-","1xk5p0hhuuzGQgsrSwa4zxemwKrcw1Wqn",
+    "1xse4zxfInecF_WsTwXrPg_C_lMLI_S6M","1yBN85LCHwQgq39YEJ9A9rpZWS8QwuO8m",
+    "1yesrAQ7HQ4XPCTBZz9016yFicq8zFjXl","1yvm_a3I_fl7rnWc9-tv6qIwSSPyP54cv",
+    "1z2tQkddkrHxdE26leXoaEzdHEIJEYOvd","1zIxFQQ3NaFP2yL82dtPnewEqMNvoT8O0",
+    "1zUy8yl7qFEqjWImhW0bcZj_mnl8FKB6T","1zaz2BBY74-o9aw4y1hpo159FdtE8FuxM",
+    "1zlDoeInZqNdadp3HW_B-weqrlf6NgT8K",
+]
 
 # 2025-04 ~ 2026-03 (12개월)
 AVAILABLE_YYYYMM = [
@@ -220,28 +297,48 @@ def _gdrive_download(file_id: str, output_path: str, label: str = "파일",
 
 
 def ensure_month_csvs(yyyymm: str) -> bool:
-    """해당 월 CSV가 없으면 Drive 폴더 전체를 gdown으로 다운로드 (최초 1회)."""
+    """해당 월 CSV가 없으면 미다운로드 파일 ID를 wget --content-disposition으로 다운로드."""
+    import subprocess, shutil
     os.makedirs(CARD_CSV_DIR, exist_ok=True)
-    existing = glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv"))
-    if existing:
+
+    # 이미 해당 월 파일 있으면 즉시 반환
+    if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
         return True
 
-    # 아직 한 번도 다운로드 안 된 경우 → 폴더 전체 다운로드
-    all_csvs = glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))
-    if not all_csvs:
-        import gdown
-        with st.spinner("카드 데이터 CSV 전체 다운로드 중... (최초 1회, 몇 분 소요)"):
-            try:
-                gdown.download_folder(
-                    id=CARD_CSV_FOLDER_ID,
-                    output=CARD_CSV_DIR,
-                    quiet=False,
-                    use_cookies=False,
-                )
-            except Exception as e:
-                st.error(f"폴더 다운로드 오류: {e}")
-                return False
+    # 전체 미다운로드 ID 목록 계산
+    done = {os.path.basename(p) for p in glob.glob(os.path.join(CARD_CSV_DIR, "*.csv"))}
+    pending = [fid for fid in CARD_FILE_IDS
+               if not any(fid[:8] in f for f in done)]  # 이미 받은 건 건너뜀
 
+    if not pending:
+        # 전부 다운로드됐는데 해당 월 파일이 없다면 Drive에 없는 것
+        st.error(f"모든 파일 다운로드 완료됐으나 {yyyymm} 데이터 없음")
+        return False
+
+    wget_bin = shutil.which("wget")
+    if not wget_bin:
+        st.error("wget을 찾을 수 없습니다")
+        return False
+
+    base_url = "https://drive.usercontent.google.com/download?export=download&confirm=t&id="
+    label = YYYYMM_LABEL.get(yyyymm, yyyymm)
+    progress = st.progress(0.0, text=f"카드 데이터 다운로드 중... 0/{len(pending)}")
+
+    for i, fid in enumerate(pending, 1):
+        url = base_url + fid
+        subprocess.run(
+            [wget_bin, "-q", "--content-disposition",
+             "--no-check-certificate", "-P", CARD_CSV_DIR, url],
+            capture_output=True, timeout=180,
+        )
+        progress.progress(i / len(pending),
+                          text=f"카드 데이터 다운로드 중... {i}/{len(pending)}")
+        # 해당 월 파일이 생기면 즉시 종료 (나머지는 다음 번에)
+        if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")):
+            progress.empty()
+            return True
+
+    progress.empty()
     return bool(glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*.csv")))
 
 
