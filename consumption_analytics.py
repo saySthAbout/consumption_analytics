@@ -326,6 +326,12 @@ def _download_gdrive_csv(file_id: str, dest_dir: str) -> str | None:
         resp = requests.get(url, stream=True, timeout=120, allow_redirects=True,
                             headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
+        # HTML 응답(쿼터 초과 등)이면 즉시 중단
+        ct = resp.headers.get("Content-Type", "")
+        if "text/html" in ct:
+            resp.close()
+            st.error("Google Drive 다운로드 쿼터 초과. 잠시 후 다시 시도해주세요.")
+            return None
         fname = _extract_cd_fname(resp.headers, file_id)
         out = os.path.join(dest_dir, fname)
         size = 0
