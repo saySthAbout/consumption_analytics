@@ -129,11 +129,19 @@ def get_flowpop_zip_path(yyyymm: str) -> str:
     return os.path.join(DATASET_DIR, f"flowpop_admi_{yyyymm}.zip")
 
 def ensure_flowpop_zip(yyyymm: str) -> bool:
-    """해당 월 flowpop ZIP이 없으면 Drive에서 다운로드."""
+    """해당 월 flowpop ZIP이 없거나 깨져 있으면 Drive에서 다운로드."""
     import gdown
     path = get_flowpop_zip_path(yyyymm)
-    if os.path.exists(path):
+    def _valid(p):
+        try:
+            with zipfile.ZipFile(p) as zf:
+                return len(zf.namelist()) > 0
+        except Exception:
+            return False
+    if os.path.exists(path) and _valid(path):
         return True
+    if os.path.exists(path):
+        os.remove(path)
     if yyyymm in FLOWPOP_COMBINED_YYYYMM:
         file_id = FLOWPOP_COMBINED_ID
     elif yyyymm in FLOWPOP_MONTHLY_IDS:
@@ -143,7 +151,7 @@ def ensure_flowpop_zip(yyyymm: str) -> bool:
     os.makedirs(DATASET_DIR, exist_ok=True)
     url = f"https://drive.google.com/uc?id={file_id}"
     with st.spinner(f"유동인구 데이터 ({YYYYMM_LABEL.get(yyyymm, yyyymm)}) 다운로드 중..."):
-        gdown.download(url, path, quiet=False)
+        gdown.download(url, path, quiet=False, fuzzy=True)
     return os.path.exists(path)
 
 SEMAS_DIR      = DATASET_DIR
@@ -169,15 +177,25 @@ YYYYMM_LABEL = {
 
 
 def ensure_main_zip():
-    """ZIP이 없으면 Google Drive에서 다운로드."""
-    if os.path.exists(MAIN_DATA_ZIP_PATH):
+    """ZIP이 없거나 깨져 있으면 Google Drive에서 다운로드."""
+    def _is_valid_zip(path):
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                return len(zf.namelist()) > 0
+        except Exception:
+            return False
+
+    if os.path.exists(MAIN_DATA_ZIP_PATH) and _is_valid_zip(MAIN_DATA_ZIP_PATH):
         return True
+    # 깨진 파일 제거 후 재다운로드
+    if os.path.exists(MAIN_DATA_ZIP_PATH):
+        os.remove(MAIN_DATA_ZIP_PATH)
     import gdown
     os.makedirs(DATASET_DIR, exist_ok=True)
     url = f"https://drive.google.com/uc?id={MAIN_DATA_ZIP_GDRIVE_ID}"
     with st.spinner("카드 데이터 ZIP을 Google Drive에서 다운로드 중입니다... (최초 1회, 약 1GB)"):
-        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False)
-    return os.path.exists(MAIN_DATA_ZIP_PATH)
+        gdown.download(url, MAIN_DATA_ZIP_PATH, quiet=False, fuzzy=True)
+    return _is_valid_zip(MAIN_DATA_ZIP_PATH)
 
 
 def load_month_csv(yyyymm: str):
@@ -212,7 +230,7 @@ def ensure_semas_data():
     os.makedirs(DATASET_DIR, exist_ok=True)
     url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
     with st.spinner("상가 데이터를 Google Drive에서 다운로드 중입니다... (최초 1회, 약 240MB)"):
-        gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+        gdown.download(url, SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
     _extract_semas_zip()
 
 
@@ -1940,7 +1958,7 @@ with tab_semas:
                 os.makedirs(DATASET_DIR, exist_ok=True)
                 url = f"https://drive.google.com/uc?id={SEMAS_GDRIVE_FILE_ID}"
                 with st.spinner("Google Drive에서 다운로드 중입니다... (약 240MB)"):
-                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False)
+                    gdown.download(url, SEMAS_ZIP_PATH, quiet=False, fuzzy=True)
                 st.rerun()
         else:
             st.warning(
