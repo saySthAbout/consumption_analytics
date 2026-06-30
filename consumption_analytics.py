@@ -767,24 +767,6 @@ with tab_pred:
             daily_pred     = sum(weighted_preds)
             avg_per_grp    = float(np.mean(preds)) if preds else 0.0
 
-            # 비교 기준: 선택 동네 + 업종 + 같은 월·요일의 실제 일평균 매출
-            area_mask = df["card_tpbuz_nm_2"] == sel_biz2
-            if sel_admi:
-                area_mask = area_mask & (df["admi_cty_no"] == sel_admi)
-            cond_mask = area_mask & (df["day"] == sel_day) & (df["month"] == sel_month)
-            if "ta_ymd" in df.columns and cond_mask.any():
-                cond_days = df.loc[cond_mask, "ta_ymd"].nunique()
-                area_daily_avg = df.loc[cond_mask, "amt"].sum() / max(cond_days, 1)
-                avg_label = f"{sel_month}월 {sel_day_label}"
-            elif area_mask.any():
-                # 조건 맞는 날이 없으면 전체 평균으로 fallback
-                cond_days = df.loc[area_mask, "ta_ymd"].nunique() if "ta_ymd" in df.columns else 30
-                area_daily_avg = df.loc[area_mask, "amt"].sum() / max(cond_days, 1)
-                avg_label = "전체"
-            else:
-                area_daily_avg = None
-                avg_label = ""
-
             # ── 업체당 매출 계산 (SEMAS 중분류 매핑 가능 업종만) ──
             store_cnt_df = load_store_counts()
             semas_mid = CARD_TO_SEMAS_MID.get(sel_biz2)
@@ -813,13 +795,6 @@ with tab_pred:
                           help=f"'{sel_biz2}'은 소상공인 상가정보와 업종 분류가 달라 업체 수 추정 불가")
             else:
                 c3.metric("업체당 예상 일매출", "-", help="동네를 선택하면 업체당 매출이 표시됩니다")
-
-            if area_daily_avg:
-                diff_pct = (daily_pred - area_daily_avg) / area_daily_avg * 100
-                arrow = "▲" if diff_pct >= 0 else "▼"
-                color = "🟢" if diff_pct >= 0 else "🔴"
-                loc_txt = f"{sel_admi_name} " if sel_admi else ""
-                st.info(f"{color} {loc_txt}{sel_biz2} 실제 일평균({fmt(area_daily_avg)}, {avg_label} 기준)보다 {arrow} {abs(diff_pct):.1f}% {'높은 수준입니다' if diff_pct >= 0 else '낮은 수준입니다'}")
 
             with st.expander("계산 과정 보기"):
                 st.text(f"- 예측에 사용된 조합 수: {len(preds)}개 (시간대 × 성별 × 연령)")
