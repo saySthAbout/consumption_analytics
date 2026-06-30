@@ -898,6 +898,7 @@ with tab_pred:
         sel_day_label != "전체" and
         sel_biz1      != "전체" and
         sel_biz2      != "전체" and
+        sel_biz2      in (["전체"] + biz2_opts) and
         sel_sex_label != "전체" and
         sel_age_label != "전체" and
         sel_hour_label!= "전체"
@@ -1048,7 +1049,8 @@ with tab_hm:
         hm_admi_name != "전체" and
         hm_month     != "전체" and
         hm_biz1      != "전체" and
-        hm_biz2      != "전체"
+        hm_biz2      != "전체" and
+        hm_biz2      in hm_biz2_opts
     )
 
     if not hm_required:
@@ -1171,7 +1173,8 @@ with tab_lstm:
         lt_district  != "전체" and
         lt_admi_name != "전체" and
         lt_biz1      != "전체" and
-        lt_biz2      != "전체"
+        lt_biz2      != "전체" and
+        lt_biz2      in lt_biz2_opts
     )
 
     if not lt_required:
@@ -1337,7 +1340,8 @@ with tab_cluster:
         cl_district != "전체" and
         cl_admi_name != "전체" and
         cl_biz1 != "전체" and
-        cl_biz2 != "전체"
+        cl_biz2 != "전체" and
+        cl_biz2 in cl_biz2_opts
     )
 
     if not required_selected:
