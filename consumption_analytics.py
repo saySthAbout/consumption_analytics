@@ -415,11 +415,61 @@ def load_cluster_model():
 
 @st.cache_data
 def load_store_counts():
-    path = os.path.join(DATASET_DIR, "semas_store_count.csv")
+    path = os.path.join(DATASET_DIR, "semas_store_count_mid.csv")
     if not os.path.exists(path):
         return None
-    df = pd.read_csv(path, encoding="utf-8-sig", dtype={"행정동코드": str})
-    return df
+    return pd.read_csv(path, encoding="utf-8-sig", dtype={"행정동코드": str})
+
+# 카드 중분류 → SEMAS 중분류 매핑 (매핑 불가 항목은 포함하지 않음)
+CARD_TO_SEMAS_MID = {
+    # 음식
+    "한식":             "한식",
+    "중식":             "중식",
+    "양식":             "서양식",
+    "일식/수산물":      "일식",
+    "커피/음료":        "비알코올 ",
+    "부페":             "구내식당·뷔페",
+    "간이주점":         "주점",
+    "유흥주점":         "주점",
+    # 소매/유통
+    "음/식료품소매":    "식료품 소매",
+    "의복/의류":        "섬유·의복·신발 소매",
+    "종합소매점":       "종합 소매",
+    "가전제품":         "가전·통신 소매",
+    "화장품소매":       "의약·화장품 소매",
+    "인테리어/가정용품":"기타 생활용품 소매",
+    "차량관리/부품":    "자동차 부품 소매",
+    # 생활서비스
+    "미용서비스":       "이용·미용",
+    "부동산":           "부동산 서비스",
+    "세탁/가사서비스":  "세탁",
+    "광고/인쇄/인화":   "광고",
+    "차량관리/서비스":  "자동차 수리·세차",
+    "연료판매":         "연료 소매",
+    "사우나/휴게시설":  "욕탕·신체관리",
+    "여행/유학대행":    "여행사·보조",
+    "수리서비스":       "기타 가정용품 수리",
+    # 의료/건강
+    "일반병원":         "의원",
+    "종합병원":         "병원",
+    "특화병원":         "의원",
+    "기타의료":         "기타 보건",
+    "수의업":           "수의",
+    "의약/의료품":      "의약·화장품 소매",
+    # 학문/교육
+    "기타교육":         "기타 교육",
+    "유아교육":         "일반 교육",
+    "예체능계학원":     "일반 교육",
+    "외국어학원":       "일반 교육",
+    "입시학원":         "일반 교육",
+    "기술/직업교육학원":"일반 교육",
+    "독서실/고시원":    "기타 교육",
+    # 여가/오락
+    "일반스포츠":       "스포츠 서비스",
+    "취미/오락":        "유원지·오락",
+    "요가/단전/마사지": "욕탕·신체관리",
+    "숙박":             "일반 숙박",
+}
 
 
 def train_single_model_no_save(X_train, X_test, y_train, y_test, model_name, use_log_target):
@@ -719,12 +769,34 @@ with tab_pred:
             else:
                 area_daily_avg = None
 
+            # ── 업체당 매출 계산 (SEMAS 중분류 매핑 가능 업종만) ──
+            store_cnt_df = load_store_counts()
+            semas_mid = CARD_TO_SEMAS_MID.get(sel_biz2)
+            per_store_pred = None
+            n_stores = 0
+            if store_cnt_df is not None and semas_mid and sel_admi:
+                sc = store_cnt_df[
+                    (store_cnt_df["행정동코드"] == str(sel_admi)) &
+                    (store_cnt_df["상권업종중분류명"] == semas_mid)
+                ]
+                n_stores = int(sc["store_count"].sum())
+                if n_stores > 0:
+                    per_store_pred = daily_pred / n_stores
+
             # 결과 표시
-            st.success(f"### 하루 예상 매출: **{fmt(daily_pred)}**")
+            st.success(f"### {sel_admi_name} {sel_biz2} 동네 전체 예상 일매출: **{fmt(daily_pred)}**")
             c1, c2, c3 = st.columns(3)
             c1.metric("조합당 평균 예측 매출", fmt(avg_per_grp))
             c2.metric("분석에 사용된 조합 수", f"{len(preds)}개 (시간대×성별×연령)")
-            c3.metric("분석 업종", sel_biz2)
+            if per_store_pred is not None:
+                c3.metric("업체당 예상 일매출",
+                          fmt(per_store_pred),
+                          help=f"SEMAS 기준 {sel_admi_name} '{semas_mid}' 업체 수: {n_stores:,}개")
+            elif semas_mid is None:
+                c3.metric("업체당 예상 일매출", "데이터 없음",
+                          help=f"'{sel_biz2}'은 소상공인 상가정보와 업종 분류가 달라 업체 수 추정 불가")
+            else:
+                c3.metric("업체당 예상 일매출", "-", help="동네를 선택하면 업체당 매출이 표시됩니다")
 
             if area_daily_avg:
                 diff_pct = (daily_pred - area_daily_avg) / area_daily_avg * 100
