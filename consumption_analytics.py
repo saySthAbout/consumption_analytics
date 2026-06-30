@@ -1611,6 +1611,7 @@ with tab_ai:
 with tab_fp:
     st.subheader("유동인구 분석")
     st.caption("행정동 단위 시간대별 유동인구 데이터를 기반으로 상권 방문 패턴을 분석합니다.")
+    st.info("ℹ️ 유동인구 데이터는 2026년 1~3월 기준입니다. 사이드바에서 선택한 카드 데이터 월과 기간이 다를 수 있습니다.")
 
     # 다운로드는 버튼 클릭 시에만 수행 (메모리 절약)
     if not os.path.exists(FLOWPOP_ZIP_PATH):
