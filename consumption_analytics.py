@@ -1367,6 +1367,7 @@ with tab_pred:
         # 데이터가 없으면 먼저 다운로드 (rerun 후 pred_run 플래그로 재진입)
         if sel_district != "전체" and sel_month != "전체":
             if "month" not in df.columns or sel_month not in df["month"].values:
+                st.info(f"📥 {sel_district} {sel_month}월 데이터를 다운로드하고 있습니다. 잠시만 기다려 주세요...")
                 ensure_month_in_df(sel_month, city_korean=sel_district)
                 st.stop()
         st.session_state["pred_run"] = False
