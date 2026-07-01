@@ -1932,27 +1932,6 @@ with tab_cluster:
             st.plotly_chart(fig_day, use_container_width=True)
 
 
-        # Autoencoder 군집 모델 요약 (있을 때만)
-        if os.path.exists(CLUSTER_MODEL_PATH):
-            st.divider()
-            st.subheader("전체 고객 유형 분류 (Autoencoder 모델)")
-            try:
-                cluster_data  = load_cluster_model()
-                cluster_stats = cluster_data["stats"]
-                cluster_names = cluster_data.get("names", [])
-                cluster_centers = cluster_data["centers"]
-                ratios = cluster_data.get("ratios", [])
-                st.dataframe(cluster_stats, use_container_width=True, hide_index=True)
-                viz_df = pd.DataFrame(cluster_centers, columns=["x", "y"])
-                viz_df["유형"] = cluster_names
-                viz_df["비율(%)"] = ratios
-                fig_c = px.scatter(viz_df, x="x", y="y", size="비율(%)", color="유형",
-                                   text="유형", size_max=60, height=380,
-                                   title="고객 유형 분포 (잠재 공간)")
-                fig_c.update_traces(textposition="top center")
-                st.plotly_chart(fig_c, use_container_width=True)
-            except Exception as e:
-                st.error(f"군집 모델 로드 오류: {e}")
 
 # =====================================================
 # 📝 AI 리포트 (OpenAI API)
