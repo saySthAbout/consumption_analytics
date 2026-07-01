@@ -2411,7 +2411,12 @@ with tab_semas:
     st.caption("소상공인시장진흥공단 상가(상권)정보를 기반으로 업종 분포·경쟁 강도·입지 추천·주변 상권을 분석합니다.")
 
     semas_df = pd.DataFrame()
-    # zip 없으면 다운로드 버튼 제공 (자동 다운로드 대신 명시적 액션)
+    # 깨진 ZIP 자동 제거
+    if os.path.exists(SEMAS_ZIP_PATH) and not _is_valid_zip(SEMAS_ZIP_PATH):
+        os.remove(SEMAS_ZIP_PATH)
+        st.session_state.pop("semas_data", None)
+        st.warning("상권 데이터 파일이 손상되어 삭제했습니다. 아래 버튼으로 다시 다운로드해주세요.")
+
     zip_exists = os.path.exists(SEMAS_ZIP_PATH)
     csv_exists = bool(glob.glob(os.path.join(SEMAS_DIR, "semas_store_info_*.csv")))
     if not zip_exists and not csv_exists:
@@ -2424,7 +2429,14 @@ with tab_semas:
     if zip_exists or csv_exists:
         if "semas_data" not in st.session_state:
             with st.spinner("상권 데이터 집계 중... (최초 1회, 잠시 기다려 주세요)"):
-                st.session_state["semas_data"] = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+                try:
+                    st.session_state["semas_data"] = load_semas_data(SEMAS_DIR, SEMAS_ZIP_PATH)
+                except Exception as e:
+                    # ZIP이 깨진 경우 삭제 후 재다운로드 유도
+                    if os.path.exists(SEMAS_ZIP_PATH):
+                        os.remove(SEMAS_ZIP_PATH)
+                    st.error(f"상권 데이터 로드 실패 (파일 손상): {e}\n\n페이지를 새로고침하면 재다운로드 버튼이 표시됩니다.")
+                    st.stop()
         semas_data = st.session_state.get("semas_data", {})
     else:
         semas_data = {}
