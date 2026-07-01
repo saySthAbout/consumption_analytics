@@ -618,6 +618,19 @@ def ensure_city_month_csv(city_korean: str, yyyymm: str) -> bool:
             return False
 
 
+def _city_month_in_df(df, city_district: str, month_int: int | None = None) -> bool:
+    """df에 해당 지역(+월) 데이터가 실제로 있는지 확인."""
+    if df is None or df.empty or "admi_cty_no" not in df.columns:
+        return False
+    city_prefixes = [k for k, v in DISTRICT_MAP.items() if v == city_district]
+    if not city_prefixes:
+        return True  # 알 수 없는 지역은 있다고 가정
+    mask = df["admi_cty_no"].astype(str).str[:5].isin(city_prefixes)
+    if month_int is not None and "month" in df.columns:
+        mask = mask & (df["month"] == month_int)
+    return bool(mask.any())
+
+
 def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
     """df에 해당 월·도시 데이터가 없으면 다운로드 후 merge."""
     df_cur = st.session_state.get("df")
@@ -1374,7 +1387,7 @@ with tab_pred:
     # ── 데이터 사전 다운로드 (예측 버튼보다 먼저) ──────────────────────
     pred_data_ready = True
     if sel_district != "전체" and sel_month != "전체":
-        if "month" not in df.columns or sel_month not in df["month"].values:
+        if not _city_month_in_df(df, sel_district, sel_month):
             pred_data_ready = False
             st.info(
                 f"📥 **{sel_district} {sel_month}월** 데이터가 필요합니다. "
@@ -1565,7 +1578,7 @@ with tab_hm:
     else:
         # ── 먼저 데이터 다운로드 확인 (필터보다 앞에) ──
         hm_m = int(hm_month.replace("월", ""))
-        if "month" not in df.columns or hm_m not in df["month"].values:
+        if not _city_month_in_df(df, hm_district, hm_m):
             ok = ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
             if not ok:
                 st.error("데이터 다운로드에 실패했습니다. 다른 조건을 선택해주세요.")
@@ -1739,7 +1752,7 @@ with tab_lstm:
         st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
     else:
         # df 비어있으면 해당 도시의 최신 월 데이터 다운로드
-        if df.empty or "month" not in df.columns:
+        if not _city_month_in_df(df, lt_district):
             _city_months = get_available_months_for_city(lt_district) if lt_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
             _latest_m = _city_months[-1] if _city_months else int(sorted(AVAILABLE_YYYYMM)[-1][4:])
             ok = ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
@@ -1890,10 +1903,10 @@ with tab_cluster:
     if cl_district != "전체":
         if cl_month != "전체":
             _cl_m = int(cl_month.replace("월", ""))
-            if "month" not in df.columns or _cl_m not in df["month"].values:
+            if not _city_month_in_df(df, cl_district, _cl_m):
                 ensure_month_in_df(_cl_m, city_korean=cl_district)
                 st.stop()
-        elif df.empty or "month" not in df.columns:
+        elif not _city_month_in_df(df, cl_district):
             _latest_m = int(sorted(AVAILABLE_YYYYMM)[-1][4:])
             ensure_month_in_df(_latest_m, city_korean=cl_district)
             st.stop()
@@ -1913,7 +1926,7 @@ with tab_cluster:
         cl_df = cl_df[cl_df["card_tpbuz_nm_2"] == cl_biz2]
     if cl_month != "전체":
         cl_m = int(cl_month.replace("월", ""))
-        if "month" not in df.columns or cl_m not in df["month"].values:
+        if not _city_month_in_df(df, cl_district, cl_m) if cl_district != "전체" else ("month" not in df.columns or cl_m not in df["month"].values):
             ensure_month_in_df(cl_m, city_korean=cl_district if cl_district != "전체" else None)
             st.stop()
         cl_df = cl_df[cl_df["month"] == cl_m]
