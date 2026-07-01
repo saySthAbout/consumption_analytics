@@ -627,20 +627,24 @@ def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
         st.warning(f"{month_int}월 데이터는 제공되지 않습니다.")
         return False
 
+    # "안양시 만안구" → "안양시" 처럼 시 단위로 정규화
+    city_base = None
+    if city_korean:
+        city_base = next((c for c in CITY_KO_TO_EN if city_korean.startswith(c)), None)
+
     # 이미 해당 월 데이터 있는지 확인
     if df_cur is not None and "month" in df_cur.columns and month_int in df_cur["month"].values:
-        if city_korean is None:
+        if city_base is None:
             return True
-        city_en = CITY_KO_TO_EN.get(city_korean)
+        city_en = CITY_KO_TO_EN.get(city_base)
         if city_en is None:
             return True
-        # 해당 도시 데이터도 있는지 확인 (admi_cty_no 기반은 어려우므로 파일 존재로 확인)
         if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv")):
             return True
 
     # 도시 지정이 있으면 해당 도시 파일만 다운로드
-    if city_korean:
-        csv_ok = ensure_city_month_csv(city_korean, yyyymm)
+    if city_base:
+        csv_ok = ensure_city_month_csv(city_base, yyyymm)
     else:
         csv_ok = ensure_month_csvs(yyyymm)
     if not csv_ok:
@@ -1379,7 +1383,10 @@ with tab_pred:
         if sel_district != "전체" and sel_month != "전체":
             if "month" not in df.columns or sel_month not in df["month"].values:
                 st.info(f"📥 {sel_district} {sel_month}월 데이터를 다운로드하고 있습니다. 잠시만 기다려 주세요...")
-                ensure_month_in_df(sel_month, city_korean=sel_district)
+                ok = ensure_month_in_df(sel_month, city_korean=sel_district)
+                if not ok:
+                    st.session_state["pred_run"] = False
+                    st.error("데이터 다운로드에 실패했습니다. 다른 지역이나 월을 선택해주세요.")
                 st.stop()
         st.session_state["pred_run"] = False
         try:
