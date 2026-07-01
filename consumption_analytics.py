@@ -1361,11 +1361,15 @@ with tab_pred:
         st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
 
     if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
-        # 데이터가 없으면 먼저 다운로드
+        st.session_state["pred_run"] = True
+
+    if pred_required and st.session_state.get("pred_run"):
+        # 데이터가 없으면 먼저 다운로드 (rerun 후 pred_run 플래그로 재진입)
         if sel_district != "전체" and sel_month != "전체":
             if "month" not in df.columns or sel_month not in df["month"].values:
                 ensure_month_in_df(sel_month, city_korean=sel_district)
-                st.rerun()
+                st.stop()
+        st.session_state["pred_run"] = False
         try:
             model, model_info = load_saved_model()
 
