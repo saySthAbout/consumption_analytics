@@ -318,15 +318,12 @@ BIZ2_MAP  = _BIZ_CATS.get("biz2", {})
 
 
 def _is_valid_zip(path):
-    """시스템 unzip으로 ZIP 유효성 확인 (압축 방식 무관)."""
-    import subprocess
+    """Python zipfile로 ZIP 유효성 확인."""
+    import zipfile as _zf
     if not os.path.exists(path) or os.path.getsize(path) < 1024:
         return False
     try:
-        proc = subprocess.run(
-            ["unzip", "-t", path], capture_output=True, timeout=30
-        )
-        return proc.returncode in (0, 1)
+        return _zf.is_zipfile(path)
     except Exception:
         return False
 
@@ -881,14 +878,22 @@ def load_semas_data(semas_dir: str, zip_path: str) -> dict:
             except Exception:
                 pass
     elif os.path.exists(zip_path):
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            for name in zf.namelist():
-                if name.endswith(".csv"):
-                    try:
-                        _process(pd.read_csv(io.BytesIO(zf.read(name)),
-                                             encoding="utf-8", usecols=use_cols))
-                    except Exception:
-                        pass
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for name in zf.namelist():
+                    if name.endswith(".csv"):
+                        try:
+                            _process(pd.read_csv(io.BytesIO(zf.read(name)),
+                                                 encoding="utf-8", usecols=use_cols))
+                        except Exception:
+                            pass
+        except zipfile.BadZipFile:
+            # 깨진 ZIP → 삭제하고 빈 결과 반환 (탭 코드에서 재다운로드 유도)
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+            return {}
 
     if not cnt_frames:
         return {}
