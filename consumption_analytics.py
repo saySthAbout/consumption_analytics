@@ -1311,7 +1311,8 @@ with tab_pred:
 
     with p1:
         if admin_ok:
-            sel_district  = st.selectbox("지역 (시/구)", ["전체"] + admin_district_list, key="pred_dist")
+            _pred_dist_list = [d for d in admin_district_list if any(d.startswith(c) for c in CITY_KO_TO_EN)]
+            sel_district  = st.selectbox("지역 (시/구)", ["전체"] + _pred_dist_list, key="pred_dist")
             dong_opts     = admin_district_to_dongs.get(sel_district, []) if sel_district != "전체" else []
             sel_admi_name = st.selectbox("동네 선택", ["전체"] + dong_opts, key="pred_dong")
             sel_admi      = admin_name_to_code.get(sel_admi_name, 0)
