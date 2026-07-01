@@ -1765,14 +1765,31 @@ with tab_lstm:
                                       min_value=_lt_date_min, max_value=_lt_date_max,
                                       key="lt_start_date")
     with dc2:
-        lt_end_date = st.date_input("종료일자", value=_lt_date_max,
-                                    min_value=_lt_date_min, max_value=_lt_date_max,
-                                    key="lt_end_date")
+        import datetime as _dt
+        _lt_end_max = min(
+            lt_start_date + _dt.timedelta(days=61),  # 시작일 기준 최대 2개월(62일)
+            _lt_date_max
+        )
+        _lt_end_default = min(
+            lt_start_date + _dt.timedelta(days=30),
+            _lt_end_max
+        )
+        lt_end_date = st.date_input(
+            "종료일자 (시작일 기준 최대 2개월)",
+            value=_lt_end_default,
+            min_value=lt_start_date,
+            max_value=_lt_end_max,
+            key="lt_end_date"
+        )
     with dc3:
         FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30, key="lt_forecast_days")
 
-    if lt_start_date > lt_end_date:
-        st.warning("⚠️ 시작일자가 종료일자보다 늦습니다. 날짜를 다시 선택해주세요.")
+    st.caption(
+        f"📌 **조회 기간**: {lt_start_date} ~ {lt_end_date}  "
+        f"({(lt_end_date - lt_start_date).days + 1}일)  |  "
+        f"아래 차트는 **{lt_admi_name if lt_admi_name != '전체' else lt_district} · {lt_biz2 if lt_biz2 != '전체' else (lt_biz1 if lt_biz1 != '전체' else '전체 업종')}** "
+        f"중분류에 해당하는 **모든 업장의 카드 매출 합산** 금액입니다."
+    )
 
     if not lt_required:
         st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
