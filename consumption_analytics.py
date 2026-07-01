@@ -2260,64 +2260,6 @@ with tab_fp:
         st.divider()
 
         # ══════════════════════════════════════════════════
-        # [기능 1] 유동인구 × 매출 상관 분석
-        # ══════════════════════════════════════════════════
-        st.markdown("#### 📈 유동인구 × 매출 상관 분석")
-        st.caption("같은 날짜·행정동 기준으로 유동인구와 매출을 연결해 상관관계를 분석합니다.")
-
-        if "ta_ymd" in df.columns:
-            sales_daily = (
-                df.groupby(["ta_ymd","admi_cty_no"])["amt"].sum().reset_index()
-                .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
-            )
-            sales_daily["date"] = pd.to_datetime(sales_daily["date"])
-            fp_daily_use = fp_daily.rename(columns={"ETL_YMD":"date","TOTAL_CNT":"FLOWPOP"})
-            fp_daily_use["ADMI_CD"] = fp_daily_use["ADMI_CD"].astype(int)
-
-            merged = pd.merge(sales_daily, fp_daily_use, on=["date","ADMI_CD"], how="inner")
-
-            if merged.empty:
-                st.info("매출 데이터와 날짜·행정동이 겹치는 데이터가 없습니다.")
-            else:
-                corr_val = merged["FLOWPOP"].corr(merged["SALES"])
-                corr_biz1 = st.selectbox(
-                    "업종 대분류 (상관분석용)",
-                    ["전체"] + BIZ1_OPTS,
-                    key="corr_biz1"
-                )
-                if corr_biz1 != "전체":
-                    sales_biz = (
-                        df[df["card_tpbuz_nm_1"] == corr_biz1]
-                        .groupby(["ta_ymd","admi_cty_no"])["amt"].sum().reset_index()
-                        .rename(columns={"ta_ymd":"date","admi_cty_no":"ADMI_CD","amt":"SALES"})
-                    )
-                    sales_biz["date"] = pd.to_datetime(sales_biz["date"])
-                    m2 = pd.merge(sales_biz, fp_daily_use, on=["date","ADMI_CD"], how="inner")
-                    if not m2.empty:
-                        merged, corr_val = m2, m2["FLOWPOP"].corr(m2["SALES"])
-
-                if not merged.empty:
-                    fig_corr = px.scatter(
-                        merged, x="FLOWPOP", y="SALES", trendline="ols",
-                        labels={"FLOWPOP":"유동인구 (명)","SALES":"일별 매출 (원)"},
-                        opacity=0.6, color_discrete_sequence=["#58a6ff"],
-                    )
-                    fig_corr.update_layout(height=380, margin=dict(t=20,b=40))
-                    st.plotly_chart(fig_corr, use_container_width=True)
-
-                    strength = (
-                        "강한 양의 상관" if corr_val > 0.7 else
-                        "중간 양의 상관" if corr_val > 0.4 else
-                        "약한 양의 상관" if corr_val > 0.1 else
-                        "거의 무상관" if corr_val > -0.1 else
-                        "음의 상관"
-                    )
-                    cr1, cr2, cr3 = st.columns(3)
-                    cr1.metric("피어슨 상관계수", f"{corr_val:.3f}")
-                    cr2.metric("상관 강도", strength)
-                    cr3.metric("분석 데이터 포인트", f"{len(merged):,}건")
-        else:
-            st.info("매출 데이터에 날짜 컬럼(ta_ymd)이 없어 상관 분석을 수행할 수 없습니다.")
 
 # =====================================================
 # 🏪 상권 분석 (SEMAS 소상공인 상가 데이터)
