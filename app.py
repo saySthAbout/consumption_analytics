@@ -1735,13 +1735,13 @@ with tab_lstm:
             all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
             all_daily = all_daily.rename(columns={"_date": "date"})
 
-            # ── 시작일자 설정 ──
+            # ── 날짜 범위 설정 ──
             if all_daily.empty:
                 st.warning("선택 조건에 해당하는 날짜별 데이터가 없습니다.")
                 st.stop()
             min_date = all_daily["date"].min().date()
             max_date = all_daily["date"].max().date()
-            sc1, sc2 = st.columns(2)
+            sc1, sc2, sc3 = st.columns(3)
             with sc1:
                 start_date = st.date_input(
                     "시작일자",
@@ -1751,9 +1751,27 @@ with tab_lstm:
                     key="lt_start_date"
                 )
             with sc2:
+                end_date = st.date_input(
+                    "종료일자",
+                    value=max_date,
+                    min_value=min_date,
+                    max_value=max_date,
+                    key="lt_end_date"
+                )
+            with sc3:
                 FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
 
-            daily = all_daily[all_daily["date"] >= pd.Timestamp(start_date)]
+            if start_date > end_date:
+                st.warning("⚠️ 시작일자가 종료일자보다 늦습니다. 날짜를 다시 선택해주세요.")
+                st.stop()
+
+            daily = all_daily[
+                (all_daily["date"] >= pd.Timestamp(start_date)) &
+                (all_daily["date"] <= pd.Timestamp(end_date))
+            ]
+            if daily.empty:
+                st.warning("선택한 날짜 범위에 데이터가 없습니다.")
+                st.stop()
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(
