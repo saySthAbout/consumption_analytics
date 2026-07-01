@@ -2070,23 +2070,67 @@ with tab_fp:
     st.subheader("유동인구 분석")
     st.caption("행정동 단위 시간대별 유동인구 데이터를 기반으로 상권 방문 패턴을 분석합니다.")
 
-    fp_yyyymm = st.session_state.get("loaded_yyyymm", AVAILABLE_YYYYMM[-1])
-    fp_label  = YYYYMM_LABEL.get(fp_yyyymm, fp_yyyymm)
-    st.info(f"ℹ️ 사이드바에서 선택한 월 기준 유동인구 데이터를 표시합니다. (현재: **{fp_label}**)")
+    # ── 공통 필터를 먼저 렌더링 (다운로드 버튼 전에 지역 선택 가능하게)
+    _fp_areas_preview = ["전체"] + sorted(CITY_KO_TO_EN.keys())
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        fp_sel_city_pre = st.selectbox("시/구 선택", _fp_areas_preview, key="fp_city")
+    with fc2:
+        fp_sel_dong_pre = st.selectbox("행정동 선택", ["전체"], key="fp_dong")
+    fp_forn = st.radio("내/외국인 구분", ["전체", "내국인만", "외국인만"],
+                       horizontal=True, key="fp_forn")
 
-    fp_zip_path = get_flowpop_zip_path(fp_yyyymm)
-    fp_cache_key = f"fp_data_{fp_yyyymm}"
+    # ── 데이터 로드 (지역 선택 시 전체 기간, 전체면 사이드바 월)
+    ALL_FP_YYYYMM = sorted(list(FLOWPOP_MONTHLY_IDS.keys()) + list(FLOWPOP_COMBINED_YYYYMM))
+
+    if fp_sel_city_pre != "전체":
+        fp_cache_key = f"fp_data_all_{fp_sel_city_pre}"
+    else:
+        fp_yyyymm = st.session_state.get("loaded_yyyymm", AVAILABLE_YYYYMM[-1])
+        fp_cache_key = f"fp_data_{fp_yyyymm}"
 
     if fp_cache_key not in st.session_state:
-        if not os.path.exists(fp_zip_path):
-            if fp_yyyymm not in FLOWPOP_MONTHLY_IDS and fp_yyyymm not in FLOWPOP_COMBINED_YYYYMM:
-                st.warning(f"{fp_label} 유동인구 데이터가 없습니다.")
-            elif st.button(f"📥 {fp_label} 유동인구 데이터 다운로드", key="fp_download"):
-                if ensure_flowpop_zip(fp_yyyymm):
+        if fp_sel_city_pre != "전체":
+            # 전체 기간 다운로드 필요한 월 목록
+            missing = [m for m in ALL_FP_YYYYMM if not os.path.exists(get_flowpop_zip_path(m))]
+            if missing:
+                labels = ", ".join(YYYYMM_LABEL.get(m, m) for m in missing)
+                st.info(f"📥 {fp_sel_city_pre} 전체 기간 분석을 위해 유동인구 데이터를 다운로드합니다.\n\n미다운로드: **{labels}**")
+                if st.button("📥 전체 기간 유동인구 데이터 다운로드", key="fp_download_all"):
+                    prog = st.progress(0, text="다운로드 준비 중...")
+                    for i, m in enumerate(missing):
+                        prog.progress((i) / len(missing), text=f"{YYYYMM_LABEL.get(m,m)} 다운로드 중...")
+                        ensure_flowpop_zip(m)
+                    prog.progress(1.0, text="다운로드 완료!")
                     st.rerun()
-        if os.path.exists(fp_zip_path):
-            with st.spinner(f"{fp_label} 유동인구 데이터 집계 중..."):
-                st.session_state[fp_cache_key] = load_flowpop_data(fp_zip_path)
+            else:
+                with st.spinner("전체 기간 유동인구 데이터 집계 중..."):
+                    frames_hm, frames_age, frames_daily = [], [], []
+                    for m in ALL_FP_YYYYMM:
+                        zp = get_flowpop_zip_path(m)
+                        if os.path.exists(zp):
+                            d = load_flowpop_data(zp)
+                            if d:
+                                frames_hm.append(d["heatmap"])
+                                frames_age.append(d["age"])
+                                frames_daily.append(d["daily"])
+                    if frames_hm:
+                        grp = ["CTY_NM", "ADMI_NM", "ADMI_CD", "FORN_GB"]
+                        st.session_state[fp_cache_key] = {
+                            "heatmap": pd.concat(frames_hm).groupby(grp + ["TIME_CD", "DOW"])["TOTAL_CNT"].mean().reset_index(),
+                            "age":     pd.concat(frames_age).groupby(grp).sum().reset_index(),
+                            "daily":   pd.concat(frames_daily).groupby(["ETL_YMD", "ADMI_CD"])["TOTAL_CNT"].sum().reset_index(),
+                        }
+        else:
+            fp_zip_path = get_flowpop_zip_path(fp_yyyymm)
+            fp_label = YYYYMM_LABEL.get(fp_yyyymm, fp_yyyymm)
+            if not os.path.exists(fp_zip_path):
+                if st.button(f"📥 {fp_label} 유동인구 데이터 다운로드", key="fp_download"):
+                    if ensure_flowpop_zip(fp_yyyymm):
+                        st.rerun()
+            if os.path.exists(fp_zip_path):
+                with st.spinner(f"{fp_label} 유동인구 데이터 집계 중..."):
+                    st.session_state[fp_cache_key] = load_flowpop_data(fp_zip_path)
 
     fp_data = st.session_state.get(fp_cache_key)
 
@@ -2097,20 +2141,17 @@ with tab_fp:
         fp_age   = fp_data["age"]
         fp_daily = fp_data["daily"]
 
-        # ── 공통 필터 ──────────────────────────────────────
-        fp_areas = sorted(fp_hm["CTY_NM"].dropna().unique())
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            fp_sel_city = st.selectbox("시/구 선택", ["전체"] + fp_areas, key="fp_city")
+        # 행정동 드롭다운 업데이트
+        if fp_sel_city_pre != "전체":
+            dong_pool = sorted(fp_hm[fp_hm["CTY_NM"] == fp_sel_city_pre]["ADMI_NM"].dropna().unique())
+        else:
+            dong_pool = sorted(fp_hm["ADMI_NM"].dropna().unique())
+
+        # 행정동 드롭다운을 데이터 로드 후 갱신
         with fc2:
-            if fp_sel_city != "전체":
-                dong_pool = sorted(fp_hm[fp_hm["CTY_NM"] == fp_sel_city]["ADMI_NM"].dropna().unique())
-            else:
-                dong_pool = sorted(fp_hm["ADMI_NM"].dropna().unique())
             fp_sel_dong = st.selectbox("행정동 선택", ["전체"] + dong_pool, key="fp_dong")
 
-        fp_forn = st.radio("내/외국인 구분", ["전체", "내국인만", "외국인만"],
-                           horizontal=True, key="fp_forn")
+        fp_sel_city = fp_sel_city_pre
 
         def _fp_filter(tbl):
             t = tbl
