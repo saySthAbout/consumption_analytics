@@ -1494,7 +1494,10 @@ with tab_ov:
 
 
     st.subheader("원본 데이터 미리보기")
-    st.dataframe(df.head(30), use_container_width=True)
+    if df is None or df.empty:
+        st.info("사이드바에서 지역과 월을 선택하면 카드 소비 데이터가 표시됩니다.")
+    else:
+        st.dataframe(df.head(30), use_container_width=True)
 
 # =====================================================
 # 📊 소비 트렌드 (구 탭2)
