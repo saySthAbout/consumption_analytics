@@ -1698,13 +1698,41 @@ with tab_lstm:
         lt_biz2      in lt_biz2_opts
     )
 
+    # ── 날짜 범위 필터 (항상 표시) ──────────────────────────────
+    _lt_all_yyyymm = sorted(
+        CITY_AVAILABLE_MONTHS.get(CITY_KO_TO_EN.get(
+            next((c for c in CITY_KO_TO_EN if lt_district.startswith(c)), ""), ""), [])
+        or AVAILABLE_YYYYMM
+    )
+    _lt_date_min = pd.Timestamp(f"{_lt_all_yyyymm[0][:4]}-{_lt_all_yyyymm[0][4:]}-01").date()
+    import calendar
+    _last_ym = _lt_all_yyyymm[-1]
+    _lt_date_max = pd.Timestamp(
+        f"{_last_ym[:4]}-{_last_ym[4:]}-{calendar.monthrange(int(_last_ym[:4]), int(_last_ym[4:]))[1]}"
+    ).date()
+
+    dc1, dc2, dc3 = st.columns(3)
+    with dc1:
+        lt_start_date = st.date_input("시작일자", value=_lt_date_min,
+                                      min_value=_lt_date_min, max_value=_lt_date_max,
+                                      key="lt_start_date")
+    with dc2:
+        lt_end_date = st.date_input("종료일자", value=_lt_date_max,
+                                    min_value=_lt_date_min, max_value=_lt_date_max,
+                                    key="lt_end_date")
+    with dc3:
+        FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30, key="lt_forecast_days")
+
+    if lt_start_date > lt_end_date:
+        st.warning("⚠️ 시작일자가 종료일자보다 늦습니다. 날짜를 다시 선택해주세요.")
+
     if not lt_required:
         st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
     else:
-        # df 비어있으면 가장 최근 월 데이터 다운로드
+        # df 비어있으면 해당 도시의 최신 월 데이터 다운로드
         if df.empty or "month" not in df.columns:
-            _latest_yyyymm = sorted(AVAILABLE_YYYYMM)[-1]
-            _latest_m = int(_latest_yyyymm[4:])
+            _city_months = get_available_months_for_city(lt_district) if lt_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
+            _latest_m = _city_months[-1] if _city_months else int(sorted(AVAILABLE_YYYYMM)[-1][4:])
             ok = ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
             if not ok:
                 st.error("데이터 다운로드에 실패했습니다. 다른 조건을 선택해주세요.")
@@ -1735,42 +1763,17 @@ with tab_lstm:
             all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
             all_daily = all_daily.rename(columns={"_date": "date"})
 
-            # ── 날짜 범위 설정 ──
             if all_daily.empty:
                 st.warning("선택 조건에 해당하는 날짜별 데이터가 없습니다.")
                 st.stop()
-            min_date = all_daily["date"].min().date()
-            max_date = all_daily["date"].max().date()
-            sc1, sc2, sc3 = st.columns(3)
-            with sc1:
-                start_date = st.date_input(
-                    "시작일자",
-                    value=min_date,
-                    min_value=min_date,
-                    max_value=max_date,
-                    key="lt_start_date"
-                )
-            with sc2:
-                end_date = st.date_input(
-                    "종료일자",
-                    value=max_date,
-                    min_value=min_date,
-                    max_value=max_date,
-                    key="lt_end_date"
-                )
-            with sc3:
-                FORECAST_DAYS = st.slider("미래 예측 기간 (일)", 7, 60, 30)
 
-            if start_date > end_date:
-                st.warning("⚠️ 시작일자가 종료일자보다 늦습니다. 날짜를 다시 선택해주세요.")
-                st.stop()
-
+            # 위에서 선택한 날짜 범위 적용
             daily = all_daily[
-                (all_daily["date"] >= pd.Timestamp(start_date)) &
-                (all_daily["date"] <= pd.Timestamp(end_date))
+                (all_daily["date"] >= pd.Timestamp(lt_start_date)) &
+                (all_daily["date"] <= pd.Timestamp(lt_end_date))
             ]
             if daily.empty:
-                st.warning("선택한 날짜 범위에 데이터가 없습니다.")
+                st.warning("선택한 날짜 범위에 해당하는 데이터가 없습니다. 날짜 범위를 넓혀보세요.")
                 st.stop()
 
             fig = go.Figure()
