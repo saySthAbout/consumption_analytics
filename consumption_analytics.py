@@ -1853,6 +1853,7 @@ with tab_lstm:
                 st.warning("선택한 날짜 범위에 해당하는 데이터가 없습니다. 날짜 범위를 넓혀보세요.")
                 st.stop()
 
+            future_dates = []   # LSTM 예측 시 채워짐
             fig = go.Figure()
             fig.add_trace(go.Scatter(
                 x=daily["date"].astype(str), y=daily["amt"],
@@ -1913,9 +1914,32 @@ with tab_lstm:
                 trace.y = [v / unit_div for v in trace.y]
                 trace.hovertemplate = f"%{{y:,.1f}}{unit_label}<extra>%{{fullData.name}}</extra>"
 
+            # x축 월 단위 tick: 매월 1일마다 "4월", "5월" 형식 라벨
+            _future_ts = pd.to_datetime(future_dates) if future_dates else pd.DatetimeIndex([])
+            _all_dates = pd.concat([
+                pd.Series(pd.to_datetime(daily["date"])),
+                pd.Series(_future_ts)
+            ]).dropna()
+            _month_starts = sorted({
+                d.replace(day=1) for d in pd.to_datetime(_all_dates)
+            })
+            _tick_vals = [str(d.date()) for d in _month_starts]
+            _years = {d.year for d in _month_starts}
+            _tick_text = [
+                f"{d.month}월" if len(_years) == 1
+                else f"{d.year % 100}년\n{d.month}월"
+                for d in _month_starts
+            ]
+
             fig.update_layout(
                 title=f"일별 매출 추이 ({lt_district} {lt_admi_name} · {lt_biz2})",
-                xaxis_title="날짜",
+                xaxis=dict(
+                    title="날짜",
+                    tickmode="array",
+                    tickvals=_tick_vals,
+                    ticktext=_tick_text,
+                    tickangle=0,
+                ),
                 yaxis_title=f"매출액 ({unit_label})",
                 yaxis=dict(tickformat=",.1f"),
                 hovermode="x unified",
