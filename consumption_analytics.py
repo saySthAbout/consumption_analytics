@@ -129,26 +129,48 @@ def get_flowpop_zip_path(yyyymm: str) -> str:
     return os.path.join(DATASET_DIR, f"flowpop_admi_{yyyymm}.zip")
 
 def _hf_download(fname: str, dest_path: str, label: str) -> bool:
-    """HuggingFace Dataset에서 파일 다운로드."""
+    """HuggingFace Dataset에서 파일 다운로드 (진행률 표시)."""
     import requests
     url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/main/{fname}"
-    with st.spinner(f"{label} 다운로드 중..."):
-        try:
-            resp = requests.get(url, stream=True, timeout=300,
-                                headers={"User-Agent": "Mozilla/5.0"})
-            if resp.status_code == 404:
-                st.error(f"{fname} 파일을 HuggingFace에서 찾을 수 없습니다.")
-                return False
-            resp.raise_for_status()
-            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-            with open(dest_path, "wb") as fp:
-                for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
-                    if chunk:
-                        fp.write(chunk)
-            return True
-        except Exception as e:
-            st.error(f"{label} 다운로드 오류: {e}")
+    try:
+        resp = requests.get(url, stream=True, timeout=300,
+                            headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code == 404:
+            st.error(f"{fname} 파일을 HuggingFace에서 찾을 수 없습니다.")
             return False
+        resp.raise_for_status()
+        total_size = int(resp.headers.get("Content-Length", 0))
+        chunk_size = 1 * 1024 * 1024  # 1MB
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+        status_text = st.empty()
+        progress_bar = st.progress(0)
+        downloaded = 0
+
+        with open(dest_path, "wb") as fp:
+            for chunk in resp.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    fp.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        pct = min(downloaded / total_size, 1.0)
+                        mb_done = downloaded / 1024 / 1024
+                        mb_total = total_size / 1024 / 1024
+                        progress_bar.progress(pct)
+                        status_text.caption(
+                            f"📥 {label} 다운로드 중... "
+                            f"{mb_done:.1f} MB / {mb_total:.1f} MB  ({pct*100:.0f}%)"
+                        )
+                    else:
+                        mb_done = downloaded / 1024 / 1024
+                        status_text.caption(f"📥 {label} 다운로드 중... {mb_done:.1f} MB")
+
+        progress_bar.progress(1.0)
+        status_text.caption(f"✅ {label} 다운로드 완료 ({downloaded/1024/1024:.1f} MB)")
+        return True
+    except Exception as e:
+        st.error(f"{label} 다운로드 오류: {e}")
+        return False
 
 
 def ensure_flowpop_zip(yyyymm: str) -> bool:
