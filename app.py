@@ -1357,11 +1357,21 @@ with tab_pred:
         sel_hour_label!= "전체"
     )
 
-    if not pred_required:
-        st.info("📌 모든 조건(지역, 동네, 월, 요일, 업종 대/중분류, 성별, 나이대, 시간대)을 선택하면 예측 버튼이 활성화됩니다.")
-
-    if pred_required and st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
-        st.session_state["pred_run"] = True
+    if st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
+        missing = []
+        if sel_district  == "전체": missing.append("지역 (시/구)")
+        if sel_admi_name == "전체": missing.append("동네")
+        if sel_month     == "전체": missing.append("월")
+        if sel_day_label == "전체": missing.append("요일")
+        if sel_biz1      == "전체": missing.append("업종 대분류")
+        if sel_biz2      == "전체": missing.append("업종 중분류")
+        if sel_sex_label == "전체": missing.append("성별")
+        if sel_age_label == "전체": missing.append("나이대")
+        if sel_hour_label== "전체": missing.append("시간대")
+        if missing:
+            st.warning(f"⚠️ 다음 조건을 선택해주세요: **{', '.join(missing)}**")
+        else:
+            st.session_state["pred_run"] = True
 
     if pred_required and st.session_state.get("pred_run"):
         # 데이터가 없으면 먼저 다운로드 (rerun 후 pred_run 플래그로 재진입)
