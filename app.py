@@ -1794,14 +1794,26 @@ with tab_lstm:
     if not lt_required:
         st.info("📌 지역(시/구), 동네, 업종 대분류, 업종 중분류를 모두 선택하면 차트가 표시됩니다.")
     else:
-        # df 비어있으면 해당 도시의 최신 월 데이터 다운로드
-        if not _city_month_in_df(df, lt_district):
-            _city_months = get_available_months_for_city(lt_district) if lt_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
-            _latest_m = _city_months[-1] if _city_months else int(sorted(AVAILABLE_YYYYMM)[-1][4:])
-            ok = ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
-            if not ok:
-                st.error("데이터 다운로드에 실패했습니다. 다른 조건을 선택해주세요.")
-            st.stop()
+        # 선택한 날짜 범위(시작~종료) 안의 월들을 모두 로드
+        _needed_months = set()
+        _cur = lt_start_date.replace(day=1)
+        while _cur <= lt_end_date:
+            _needed_months.add(int(f"{_cur.year}{_cur.month:02d}"))
+            _next_month = _cur.month % 12 + 1
+            _next_year  = _cur.year + (_cur.month // 12)
+            _cur = _cur.replace(year=_next_year, month=_next_month)
+
+        _city_avail_yyyymm = set(
+            get_available_months_for_city(lt_district)
+        ) if lt_district != "전체" else set()
+
+        for _nm in sorted(_needed_months):
+            _nm_month = _nm % 100   # e.g. 202504 → 4
+            if not _city_month_in_df(df, lt_district, _nm_month):
+                ok = ensure_month_in_df(_nm_month, city_korean=lt_district if lt_district != "전체" else None)
+                if not ok:
+                    st.error(f"{_nm_month}월 데이터 다운로드에 실패했습니다.")
+                st.stop()
 
         # ── 필터 적용 ──
         lt_df = df.copy()
