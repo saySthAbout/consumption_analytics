@@ -1711,13 +1711,23 @@ with tab_lstm:
         if lt_df.empty:
             st.warning("선택 조건에 해당하는 데이터가 없습니다.")
         else:
-            # ta_ymd는 로드 시 이미 datetime으로 변환됨
-            date_col = "ta_ymd" if "ta_ymd" in lt_df.columns else "date"
+            # 날짜 컬럼 찾기
+            date_col = next((c for c in ["ta_ymd", "date"] if c in lt_df.columns), None)
+            if date_col is None:
+                st.warning("날짜 컬럼이 없어 시계열 차트를 표시할 수 없습니다.")
+                st.stop()
             lt_df["_date"] = pd.to_datetime(lt_df[date_col], errors="coerce")
+            lt_df = lt_df.dropna(subset=["_date"])
+            if lt_df.empty:
+                st.warning("날짜 파싱 후 유효한 데이터가 없습니다.")
+                st.stop()
             all_daily = lt_df.groupby("_date")["amt"].sum().reset_index().sort_values("_date")
             all_daily = all_daily.rename(columns={"_date": "date"})
 
             # ── 시작일자 설정 ──
+            if all_daily.empty:
+                st.warning("선택 조건에 해당하는 날짜별 데이터가 없습니다.")
+                st.stop()
             min_date = all_daily["date"].min().date()
             max_date = all_daily["date"].max().date()
             sc1, sc2 = st.columns(2)
