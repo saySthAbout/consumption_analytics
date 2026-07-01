@@ -832,7 +832,6 @@ def load_flowpop_data(zip_path: str) -> dict:
     return {"heatmap": heatmap_df, "age": age_df, "daily": daily_df}
 
 
-@st.cache_data
 def load_semas_data(semas_dir: str, zip_path: str) -> dict:
     """SEMAS 데이터를 파일별로 읽으면서 즉시 집계 — 작은 집계 DataFrame 딕셔너리 반환."""
     import zipfile, io
@@ -2416,10 +2415,14 @@ with tab_semas:
     st.caption("소상공인시장진흥공단 상가(상권)정보를 기반으로 업종 분포·경쟁 강도·입지 추천·주변 상권을 분석합니다.")
 
     semas_df = pd.DataFrame()
-    # 깨진 ZIP 자동 제거
+    # 깨진 ZIP 자동 제거 (st.cache_data 캐시도 함께 클리어)
     if os.path.exists(SEMAS_ZIP_PATH) and not _is_valid_zip(SEMAS_ZIP_PATH):
         os.remove(SEMAS_ZIP_PATH)
         st.session_state.pop("semas_data", None)
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
         st.warning("상권 데이터 파일이 손상되어 삭제했습니다. 아래 버튼으로 다시 다운로드해주세요.")
 
     zip_exists = os.path.exists(SEMAS_ZIP_PATH)
