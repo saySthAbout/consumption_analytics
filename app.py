@@ -1320,11 +1320,9 @@ with tab_pred:
             sel_admi = 0
 
         _avail_months = get_available_months_for_city(sel_district) if sel_district != "전체" else sorted({int(m[4:]) for m in AVAILABLE_YYYYMM})
-        _def_month_val = int(loaded_yyyymm[-2:])
-        _def_month_idx = (_avail_months.index(_def_month_val) + 1) if _def_month_val in _avail_months else 0
         sel_month     = st.selectbox("월", ["전체"] + _avail_months,
                                      format_func=lambda x: f"{x}월" if x != "전체" else "전체",
-                                     index=_def_month_idx,
+                                     index=0,
                                      key="pred_month")
         sel_day_label = st.selectbox("요일", ["전체"] + list(DAY_MAP.values()), key="pred_day")
         sel_day       = {v: k for k, v in DAY_MAP.items()}.get(sel_day_label)
