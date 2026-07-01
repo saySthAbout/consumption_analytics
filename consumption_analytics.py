@@ -1362,7 +1362,23 @@ with tab_pred:
         sel_hour_label!= "전체"
     )
 
-    if st.button("1인당 소비금액 예측", type="primary", key="pred_btn"):
+    # ── 데이터 사전 다운로드 (예측 버튼보다 먼저) ──────────────────────
+    pred_data_ready = True
+    if sel_district != "전체" and sel_month != "전체":
+        if "month" not in df.columns or sel_month not in df["month"].values:
+            pred_data_ready = False
+            st.info(
+                f"📥 **{sel_district} {sel_month}월** 데이터가 필요합니다. "
+                f"아래 버튼을 눌러 먼저 다운로드하세요. (파일 크기에 따라 1~3분 소요될 수 있습니다)"
+            )
+            if st.button("📥 데이터 다운로드", key="pred_download_btn"):
+                with st.spinner(f"{sel_district} {sel_month}월 데이터 다운로드 중... 잠시만 기다려 주세요."):
+                    ok = ensure_month_in_df(sel_month, city_korean=sel_district)
+                if not ok:
+                    st.error("데이터 다운로드에 실패했습니다. 다른 지역이나 월을 선택해주세요.")
+
+    if st.button("1인당 소비금액 예측", type="primary", key="pred_btn",
+                 disabled=not pred_data_ready):
         missing = []
         if sel_district  == "전체": missing.append("지역 (시/구)")
         if sel_admi_name == "전체": missing.append("동네")
@@ -1378,16 +1394,7 @@ with tab_pred:
         else:
             st.session_state["pred_run"] = True
 
-    if pred_required and st.session_state.get("pred_run"):
-        # 데이터가 없으면 먼저 다운로드 (rerun 후 pred_run 플래그로 재진입)
-        if sel_district != "전체" and sel_month != "전체":
-            if "month" not in df.columns or sel_month not in df["month"].values:
-                st.info(f"📥 {sel_district} {sel_month}월 데이터를 다운로드하고 있습니다. 잠시만 기다려 주세요...")
-                ok = ensure_month_in_df(sel_month, city_korean=sel_district)
-                if not ok:
-                    st.session_state["pred_run"] = False
-                    st.error("데이터 다운로드에 실패했습니다. 다른 지역이나 월을 선택해주세요.")
-                    st.stop()
+    if pred_required and pred_data_ready and st.session_state.get("pred_run"):
         st.session_state["pred_run"] = False
         try:
             model, model_info = load_saved_model()
