@@ -1599,7 +1599,7 @@ with tab_hm:
 
             # ── 차트 2: 요일별 매출 ──
             st.markdown("#### 📅 요일별 매출")
-            dow_order = ["월","화","수","목","금","토","일"]
+            dow_order = ["월요일","화요일","수요일","목요일","금요일","토요일","일요일"]
             day_grp = hm_df.groupby("day")["amt"].sum().reset_index()
             day_grp["요일"] = day_grp["day"].map(DAY_MAP)
             day_grp["요일"] = pd.Categorical(day_grp["요일"], categories=dow_order, ordered=True)
@@ -1619,7 +1619,8 @@ with tab_hm:
                         .unstack(fill_value=0))
             dh_pivot.index = [DAY_MAP.get(d, d) for d in dh_pivot.index]
             dh_pivot.columns = [HOUR_MAP.get(h, str(h)) for h in dh_pivot.columns]
-            dh_pivot = dh_pivot.reindex([d for d in dow_order if d in dh_pivot.index])
+            _dow_order_full = ["월요일","화요일","수요일","목요일","금요일","토요일","일요일"]
+            dh_pivot = dh_pivot.reindex([d for d in _dow_order_full if d in dh_pivot.index])
             fig_dh = go.Figure(go.Heatmap(
                 z=dh_pivot.values,
                 x=dh_pivot.columns.tolist(),
