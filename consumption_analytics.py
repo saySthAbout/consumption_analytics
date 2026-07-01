@@ -639,7 +639,16 @@ def ensure_month_in_df(month_int: int, city_korean: str | None = None) -> bool:
         city_en = CITY_KO_TO_EN.get(city_base)
         if city_en is None:
             return True
-        if glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv")):
+        # 파일 존재 여부가 아니라 실제 df에 해당 도시+월 데이터가 있는지 확인
+        city_prefixes = [k for k, v in DISTRICT_MAP.items() if v.startswith(city_base)]
+        if city_prefixes:
+            mask = (
+                df_cur["admi_cty_no"].astype(str).str[:5].isin(city_prefixes) &
+                (df_cur["month"] == month_int)
+            )
+            if mask.any():
+                return True
+        elif glob.glob(os.path.join(CARD_CSV_DIR, f"*{yyyymm}*{city_en}*.csv")):
             return True
 
     # 도시 지정이 있으면 해당 도시 파일만 다운로드
