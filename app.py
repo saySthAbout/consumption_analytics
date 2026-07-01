@@ -2014,6 +2014,20 @@ with tab_ai:
         ai_biz2_opts = ["전체"] + BIZ2_MAP.get(ai_biz1, []) if ai_biz1 != "전체" else ["전체"]
         ai_biz2      = st.selectbox("업종 중분류", ai_biz2_opts, key="ai_biz2")
 
+    # 지역 선택 시 해당 도시 데이터 자동 로드
+    if ai_district != "전체":
+        _ai_city_prefixes = [k for k, v in DISTRICT_MAP.items() if v == ai_district]
+        _ai_city_in_df = (
+            not df.empty and "admi_cty_no" in df.columns and
+            df["admi_cty_no"].astype(str).str[:5].isin(_ai_city_prefixes).any()
+        )
+        if not _ai_city_in_df:
+            _ai_city_months = get_available_months_for_city(ai_district)
+            _ai_latest_m = _ai_city_months[-1] if _ai_city_months else int(sorted(AVAILABLE_YYYYMM)[-1][4:])
+            with st.spinner(f"{ai_district} 데이터 로드 중..."):
+                ensure_month_in_df(_ai_latest_m, city_korean=ai_district)
+            st.stop()
+
     # 버튼 활성화 조건 검사
     _ai_missing = []
     if not api_key:
