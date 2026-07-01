@@ -1387,7 +1387,7 @@ with tab_pred:
                 if not ok:
                     st.session_state["pred_run"] = False
                     st.error("데이터 다운로드에 실패했습니다. 다른 지역이나 월을 선택해주세요.")
-                st.stop()
+                    st.stop()
         st.session_state["pred_run"] = False
         try:
             model, model_info = load_saved_model()
@@ -1550,7 +1550,9 @@ with tab_hm:
         # ── 먼저 데이터 다운로드 확인 (필터보다 앞에) ──
         hm_m = int(hm_month.replace("월", ""))
         if "month" not in df.columns or hm_m not in df["month"].values:
-            ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
+            ok = ensure_month_in_df(hm_m, city_korean=hm_district if hm_district != "전체" else None)
+            if not ok:
+                st.error("데이터 다운로드에 실패했습니다. 다른 조건을 선택해주세요.")
             st.stop()
 
         # ── 필터 적용 ──
@@ -1696,7 +1698,9 @@ with tab_lstm:
         if df.empty or "month" not in df.columns:
             _latest_yyyymm = sorted(AVAILABLE_YYYYMM)[-1]
             _latest_m = int(_latest_yyyymm[4:])
-            ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
+            ok = ensure_month_in_df(_latest_m, city_korean=lt_district if lt_district != "전체" else None)
+            if not ok:
+                st.error("데이터 다운로드에 실패했습니다. 다른 조건을 선택해주세요.")
             st.stop()
 
         # ── 필터 적용 ──
@@ -2015,15 +2019,18 @@ with tab_ai:
                         st.warning("선택 조건에 해당하는 데이터가 없습니다.")
                     else:
                         top_biz2  = filtered.groupby("card_tpbuz_nm_2")["amt"].sum().nlargest(5)
-                        top_hour  = filtered.groupby("hour")["amt"].sum().idxmax()
-                        top_day   = filtered.groupby("day")["amt"].sum().idxmax()
-                        top_age   = filtered.groupby("age")["amt"].sum().idxmax()
+                        _hour_s = filtered.groupby("hour")["amt"].sum()
+                        _day_s  = filtered.groupby("day")["amt"].sum()
+                        _age_s  = filtered.groupby("age")["amt"].sum()
+                        top_hour  = _hour_s.idxmax() if not _hour_s.empty else None
+                        top_day   = _day_s.idxmax()  if not _day_s.empty  else None
+                        top_age   = _age_s.idxmax()  if not _age_s.empty  else None
                         total_amt = filtered["amt"].sum()
                         avg_amt   = filtered["amt"].mean()
 
-                        hour_label = HOUR_MAP.get(top_hour, str(top_hour))
-                        day_label  = DAY_MAP.get(top_day, str(top_day))
-                        age_label  = AGE_MAP.get(top_age, str(top_age))
+                        hour_label = HOUR_MAP.get(top_hour, str(top_hour)) if top_hour is not None else "알 수 없음"
+                        day_label  = DAY_MAP.get(top_day, str(top_day))   if top_day  is not None else "알 수 없음"
+                        age_label  = AGE_MAP.get(top_age, str(top_age))   if top_age  is not None else "알 수 없음"
 
                         loc_label = f"{ai_district} {ai_admi_name}".strip()
                         biz_label = f"{ai_biz1} > {ai_biz2}" if ai_biz2 != "전체" else ai_biz1
@@ -2087,8 +2094,7 @@ with tab_fp:
     fc1, fc2 = st.columns(2)
     with fc1:
         fp_sel_city_pre = st.selectbox("시/구 선택", _fp_areas_preview, key="fp_city")
-    with fc2:
-        fp_sel_dong_pre = st.selectbox("행정동 선택", ["전체"], key="fp_dong")
+    fp_sel_dong = "전체"  # default; overwritten below when data is loaded
     fp_forn = st.radio("내/외국인 구분", ["전체", "내국인만", "외국인만"],
                        horizontal=True, key="fp_forn")
 
@@ -2439,38 +2445,41 @@ with tab_semas:
         st.caption("행정동 단위로 같은 업종(중분류)이 몇 개나 밀집해 있는지 경쟁 강도를 보여줍니다.")
 
         comp_biz2_list = sorted(sm_f["상권업종중분류명"].dropna().unique())
-        comp_col1, comp_col2 = st.columns(2)
-        with comp_col1:
-            comp_biz2 = st.selectbox("분석할 업종 (중분류)", comp_biz2_list, key="sm_comp_biz2")
-        with comp_col2:
-            comp_top_n = st.slider("상위 행정동 수", 5, 30, 15, key="sm_comp_n")
-
-        comp_df = sm_f[sm_f["상권업종중분류명"] == comp_biz2]
-        if comp_df.empty:
-            st.info("선택한 업종의 데이터가 없습니다.")
+        if not comp_biz2_list:
+            st.info("선택한 필터 조건에 해당하는 업종 데이터가 없습니다.")
         else:
-            comp_by_dong = (comp_df.groupby(["시군구명","행정동명"])["점포수"]
-                            .sum().reset_index()
-                            .sort_values("점포수", ascending=False).head(comp_top_n))
-            comp_by_dong["지역"] = comp_by_dong["시군구명"] + " " + comp_by_dong["행정동명"]
+            comp_col1, comp_col2 = st.columns(2)
+            with comp_col1:
+                comp_biz2 = st.selectbox("분석할 업종 (중분류)", comp_biz2_list, key="sm_comp_biz2")
+            with comp_col2:
+                comp_top_n = st.slider("상위 행정동 수", 5, 30, 15, key="sm_comp_n")
 
-            fig_comp = go.Figure(go.Bar(
-                x=comp_by_dong["점포수"], y=comp_by_dong["지역"],
-                orientation="h", marker_color="#f78166",
-                text=comp_by_dong["점포수"], textposition="outside",
-                hovertemplate="%{y}: %{x}개<extra></extra>",
-            ))
-            fig_comp.update_layout(
-                xaxis_title="점포 수", yaxis=dict(autorange="reversed"),
-                height=max(300, comp_top_n * 26), margin=dict(t=20, b=40, r=80),
-            )
-            st.plotly_chart(fig_comp, use_container_width=True)
+            comp_df = sm_f[sm_f["상권업종중분류명"] == comp_biz2]
+            if comp_df.empty:
+                st.info("선택한 업종의 데이터가 없습니다.")
+            else:
+                comp_by_dong = (comp_df.groupby(["시군구명","행정동명"])["점포수"]
+                                .sum().reset_index()
+                                .sort_values("점포수", ascending=False).head(comp_top_n))
+                comp_by_dong["지역"] = comp_by_dong["시군구명"] + " " + comp_by_dong["행정동명"]
 
-            dong_cnt = comp_df.groupby("행정동명")["점포수"].sum()
-            cx1, cx2, cx3 = st.columns(3)
-            cx1.metric(f"'{comp_biz2}' 총 점포 수", f"{int(comp_df['점포수'].sum()):,}개")
-            cx2.metric("행정동 평균 점포 수", f"{dong_cnt.mean():.1f}개")
-            cx3.metric("1위 동네 점포 수", f"{comp_by_dong['점포수'].iloc[0]:,}개")
+                fig_comp = go.Figure(go.Bar(
+                    x=comp_by_dong["점포수"], y=comp_by_dong["지역"],
+                    orientation="h", marker_color="#f78166",
+                    text=comp_by_dong["점포수"], textposition="outside",
+                    hovertemplate="%{y}: %{x}개<extra></extra>",
+                ))
+                fig_comp.update_layout(
+                    xaxis_title="점포 수", yaxis=dict(autorange="reversed"),
+                    height=max(300, comp_top_n * 26), margin=dict(t=20, b=40, r=80),
+                )
+                st.plotly_chart(fig_comp, use_container_width=True)
+
+                dong_cnt = comp_df.groupby("행정동명")["점포수"].sum()
+                cx1, cx2, cx3 = st.columns(3)
+                cx1.metric(f"'{comp_biz2}' 총 점포 수", f"{int(comp_df['점포수'].sum()):,}개")
+                cx2.metric("행정동 평균 점포 수", f"{dong_cnt.mean():.1f}개")
+                cx3.metric("1위 동네 점포 수", f"{comp_by_dong['점포수'].iloc[0]:,}개")
 
         st.divider()
 
@@ -2494,8 +2503,12 @@ with tab_semas:
         rec_store_cnt = (rec_scope[rec_scope["상권업종중분류명"] == rec_biz2]
                          .groupby("행정동명")["점포수"].sum().reset_index())
 
-        fp_data_rec = st.session_state.get("fp_data", {})
-        fp_available = bool(fp_data_rec) and "age" in fp_data_rec
+        fp_data_rec = next(
+            (v for k, v in st.session_state.items()
+             if k.startswith("fp_data") and isinstance(v, dict) and "age" in v),
+            {}
+        )
+        fp_available = bool(fp_data_rec)
 
         if fp_available:
             fp_dong_pop = (
