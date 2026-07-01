@@ -1839,9 +1839,9 @@ with tab_lstm:
                             name="LSTM 예측", line=dict(color="#3fb950", dash="dash")
                         ))
                         c1, c2, c3 = st.columns(3)
-                        c1.metric("예측 평균 일매출", fmt(pred_vals.mean()))
-                        c2.metric("예측 최고 매출일", fmt(pred_vals.max()))
-                        c3.metric("예측 최저 매출일", fmt(pred_vals.min()))
+                        c1.metric("예측 평균 일매출 (전체 합산)", fmt(pred_vals.mean()))
+                        c2.metric("예측 최고 매출일 (전체 합산)", fmt(pred_vals.max()))
+                        c3.metric("예측 최저 매출일 (전체 합산)", fmt(pred_vals.min()))
                 except Exception as e:
                     st.warning(f"LSTM 예측 오류: {e}")
 
@@ -1869,8 +1869,8 @@ with tab_lstm:
             st.plotly_chart(fig, use_container_width=True)
 
             d1, d2 = st.columns(2)
-            d1.metric("기간 평균 일매출", fmt(daily["amt"].mean()))
-            d2.metric("기간 총 매출",     fmt(daily["amt"].sum()))
+            d1.metric("기간 평균 일매출 (전체 합산)", fmt(daily["amt"].mean()))
+            d2.metric("기간 총 매출 (전체 합산)",     fmt(daily["amt"].sum()))
 
 # =====================================================
 # 👥 고객 군집 분석 (Autoencoder + KMeans)
